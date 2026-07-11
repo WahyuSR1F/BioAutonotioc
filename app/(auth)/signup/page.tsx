@@ -36,19 +36,29 @@ export default function SignupPage() {
 
   async function onSubmit(data: FormData) {
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: data.email,
-      password: data.password,
-      options: {
-        data: { display_name: data.displayName },
-      },
+
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: data.email,
+        password: data.password,
+        displayName: data.displayName,
+      }),
     });
+
+    const result = await res.json();
     setLoading(false);
 
-    if (error) {
-      toast.error(error.message);
+    if (!res.ok) {
+      toast.error(result.error);
       return;
     }
+
+    await supabase.auth.signInWithPassword({
+      email: data.email,
+      password: data.password,
+    });
 
     toast.success('Akun berhasil dibuat!');
     router.push('/dashboard');
