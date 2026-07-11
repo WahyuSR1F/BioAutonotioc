@@ -11,39 +11,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email dan password wajib diisi' }, { status: 400 });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    const { data: userData, error: createError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { display_name: displayName },
+    // Create user directly via Auth Admin REST API
+    const res = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { display_name: displayName },
+      }),
     });
 
-    if (createError) {
-      return NextResponse.json({ error: createError.message }, { status: 400 });
+    const result = await res.json();
+
+    if (!res.ok) {
+      return NextResponse.json({
+        error: result.msg || result.error || result.message || 'Gagal membuat akun',
+      }, { status: 400 });
     }
 
-    if (!userData.user) {
+    const userId = result.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Gagal membuat user' }, { status: 500 });
     }
 
+    const supabase = createClient(supabaseUrl, serviceKey);
     const { error: profileError } = await supabase.from('profiles').insert({
-      id: userData.user.id,
-      email: userData.user.email!,
+      id: userId,
+      email,
       display_name: displayName || null,
     });
 
     if (profileError) {
-      return NextResponse.json({ error: profileError.message }, { status: 500 });
+      return NextResponse.json({ error: profileError.message || 'Gagal menyimpan profil' }, { status: 500 });
     }
 
-    return NextResponse.json({ user: userData.user });
+    return NextResponse.json({ user: { id: userId, email } });
   } catch (err) {
     console.error('Signup error', err);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 });
   }
 }
