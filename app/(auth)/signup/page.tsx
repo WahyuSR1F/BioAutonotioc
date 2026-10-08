@@ -11,7 +11,6 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createClient } from '@/lib/supabase/client';
 
 const schema = z.object({
   displayName: z.string().min(2, 'Nama minimal 2 karakter'),
@@ -28,7 +27,6 @@ type FormData = z.infer<typeof schema>;
 export default function SignupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const supabase = createClient();
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -54,11 +52,6 @@ export default function SignupPage() {
       toast.error(result.error);
       return;
     }
-
-    await supabase.auth.signInWithPassword({
-      email: data.email,
-      password: data.password,
-    });
 
     toast.success('Akun berhasil dibuat!');
     router.push('/dashboard');

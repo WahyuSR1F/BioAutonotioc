@@ -1,33 +1,43 @@
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, queryOne, bool, num, numOrNull, str, strOrNull } from '@/lib/turso/client';
 import ProductForm from '@/components/products/product-form';
-import type { Product, ProductFile } from '@/lib/supabase/types';
+import type { Product, ProductFile } from '@/lib/types';
 
 interface Props {
   params: { id: string };
 }
 
 export default async function EditProductPage({ params }: Props) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data: productData } = await supabase
-    .from('products')
-    .select('id, title, description, price, cover_url, is_active')
-    .eq('id', params.id)
-    .eq('creator_id', user.id)
-    .maybeSingle();
+  const productRow = await queryOne(
+    'SELECT id, title, description, price, cover_url, is_active FROM products WHERE id = ? AND creator_id = ?',
+    [params.id, user.id]
+  );
 
-  const product = productData as Pick<Product, 'id' | 'title' | 'description' | 'price' | 'cover_url' | 'is_active'> | null;
-  if (!product) notFound();
+  if (!productRow) notFound();
 
-  const { data: filesData } = await supabase
-    .from('product_files')
-    .select('id, file_name, file_size, storage_path')
-    .eq('product_id', params.id);
+  const product: Pick<Product, 'id' | 'title' | 'description' | 'price' | 'cover_url' | 'is_active'> = {
+    id: str(productRow.id),
+    title: str(productRow.title),
+    description: strOrNull(productRow.description),
+    price: num(productRow.price),
+    cover_url: strOrNull(productRow.cover_url),
+    is_active: bool(productRow.is_active),
+  };
 
-  const files = (filesData ?? []) as Pick<ProductFile, 'id' | 'file_name' | 'file_size' | 'storage_path'>[];
+  const fileRows = await queryAll(
+    'SELECT id, file_name, file_size FROM product_files WHERE product_id = ?',
+    [params.id]
+  );
+
+  const files: Pick<ProductFile, 'id' | 'file_name' | 'file_size'>[] = fileRows.map((r) => ({
+    id: str(r.id),
+    file_name: str(r.file_name),
+    file_size: numOrNull(r.file_size),
+  }));
 
   return (
     <div className="p-8 space-y-6">

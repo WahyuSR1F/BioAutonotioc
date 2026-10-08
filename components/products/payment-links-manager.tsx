@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, Plus, Trash2, ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { createClient } from '@/lib/supabase/client';
 import { slugify } from '@/lib/utils';
 
 interface Link {
@@ -21,7 +20,6 @@ interface Props {
 }
 
 export default function PaymentLinksManager({ productId, productTitle, initialLinks }: Props) {
-  const supabase = createClient();
   const [links, setLinks] = useState<Link[]>(initialLinks);
   const [loading, setLoading] = useState(false);
 
@@ -30,31 +28,39 @@ export default function PaymentLinksManager({ productId, productTitle, initialLi
   async function generateLink() {
     setLoading(true);
     const slug = `${slugify(productTitle)}-${Date.now().toString(36)}`;
-    const { data, error } = await supabase
-      .from('payment_links')
-      .insert({ product_id: productId, slug })
-      .select()
-      .single();
+
+    const res = await fetch('/api/payment-links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId, slug }),
+    });
+    const result = await res.json();
     setLoading(false);
 
-    if (error) { toast.error(error.message); return; }
-    setLinks((prev) => [data, ...prev]);
+    if (!res.ok) { toast.error(result.error || 'Gagal membuat link'); return; }
+    setLinks((prev) => [
+      { id: result.id, slug: result.slug, is_active: true, created_at: new Date().toISOString() },
+      ...prev,
+    ]);
     toast.success('Payment link baru dibuat!');
   }
 
   async function toggleLink(id: string, isActive: boolean) {
-    const { error } = await supabase
-      .from('payment_links')
-      .update({ is_active: !isActive })
-      .eq('id', id);
-    if (error) { toast.error(error.message); return; }
+    const res = await fetch(`/api/payment-links/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: !isActive }),
+    });
+    const result = await res.json();
+    if (!res.ok) { toast.error(result.error || 'Gagal mengubah link'); return; }
     setLinks((prev) => prev.map((l) => l.id === id ? { ...l, is_active: !isActive } : l));
     toast.success(isActive ? 'Link dinonaktifkan' : 'Link diaktifkan');
   }
 
   async function deleteLink(id: string) {
-    const { error } = await supabase.from('payment_links').delete().eq('id', id);
-    if (error) { toast.error(error.message); return; }
+    const res = await fetch(`/api/payment-links/${id}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (!res.ok) { toast.error(result.error || 'Gagal menghapus link'); return; }
     setLinks((prev) => prev.filter((l) => l.id !== id));
     toast.success('Link dihapus');
   }

@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import { execute, queryOne, str, nowIso } from '@/lib/turso/client';
+import { deliverOrder } from '@/lib/deliver';
+import { createHash, randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 function verifyMidtransSignature(
   orderId: string,
@@ -19,7 +13,7 @@ function verifyMidtransSignature(
   incomingSignature: string
 ): boolean {
   const raw = `${orderId}${statusCode}${grossAmount}${serverKey}`;
-  const computed = crypto.createHash('sha512').update(raw).digest('hex');
+  const computed = createHash('sha512').update(raw).digest('hex');
   return computed === incomingSignature;
 }
 
@@ -53,42 +47,31 @@ export async function POST(req: NextRequest) {
     else if (isFailed) payment_status = 'failed';
     else payment_status = 'pending';
 
-    const updatePayload: Record<string, unknown> = {
-      payment_status,
-      raw_webhook: body,
-      updated_at: new Date().toISOString(),
-    };
-    if (isPaid) updatePayload.paid_at = new Date().toISOString();
+    const paidAt = isPaid ? nowIso() : null;
 
-    const supabase = getSupabase();
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .update(updatePayload)
-      .eq('payment_ref', order_id)
-      .select('id')
-      .maybeSingle();
+    const order = await queryOne<{ id: string }>(
+      `UPDATE orders
+       SET payment_status = ?, raw_webhook = ?, updated_at = ?,
+           paid_at = COALESCE(?, paid_at)
+       WHERE payment_ref = ?
+       RETURNING id`,
+      [payment_status, JSON.stringify(body), nowIso(), paidAt, order_id]
+    );
 
-    if (orderError || !order) {
-      console.error('Order update failed', orderError);
+    if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
     if (isPaid) {
-      await supabase.from('deliveries').upsert(
-        { order_id: order.id, status: 'pending', updated_at: new Date().toISOString() },
-        { onConflict: 'order_id' }
+      const orderId = str(order.id);
+      await execute(
+        `INSERT INTO deliveries (id, order_id, status, updated_at)
+         VALUES (?, ?, 'pending', ?)
+         ON CONFLICT(order_id) DO UPDATE SET status = 'pending', updated_at = excluded.updated_at`,
+        [randomUUID(), orderId, nowIso()]
       );
 
-      // Trigger deliver-product edge function
-      const edgeFnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/deliver-product`;
-      fetch(edgeFnUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({ orderId: order.id }),
-      }).catch(console.error);
+      await deliverOrder(orderId);
     }
 
     return NextResponse.json({ ok: true });

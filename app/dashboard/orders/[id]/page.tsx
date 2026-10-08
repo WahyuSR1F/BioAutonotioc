@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryOne, num, numOrNull, str, strOrNull, bool } from '@/lib/turso/client';
 import Link from 'next/link';
 import { ArrowLeft, Mail, CreditCard, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,19 +47,56 @@ interface OrderDetail {
 }
 
 export default async function OrderDetailPage({ params }: Props) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
-    .from('orders')
-    .select(`*, products(title, description, cover_url), deliveries(*)`)
-    .eq('id', params.id)
-    .eq('creator_id', user.id)
-    .maybeSingle();
+  const row = await queryOne(
+    `SELECT o.id, o.buyer_email, o.buyer_name, o.amount, o.currency,
+            o.payment_status, o.payment_provider, o.payment_ref, o.paid_at, o.created_at,
+            p.title AS product_title, p.description AS product_description, p.cover_url AS product_cover_url,
+            d.id AS delivery_id, d.status AS delivery_status, d.attempts AS delivery_attempts,
+            d.sent_at AS delivery_sent_at, d.resend_email_id AS delivery_resend_email_id,
+            d.last_error AS delivery_last_error
+     FROM orders o
+     LEFT JOIN products p ON p.id = o.product_id
+     LEFT JOIN deliveries d ON d.order_id = o.id
+     WHERE o.id = ? AND o.creator_id = ?`,
+    [params.id, user.id]
+  );
 
-  const order = data as unknown as OrderDetail | null;
-  if (!order) notFound();
+  if (!row) notFound();
+
+  const order: OrderDetail = {
+    id: str(row.id),
+    buyer_email: str(row.buyer_email),
+    buyer_name: strOrNull(row.buyer_name),
+    amount: num(row.amount),
+    currency: str(row.currency),
+    payment_status: str(row.payment_status),
+    payment_provider: str(row.payment_provider),
+    payment_ref: strOrNull(row.payment_ref),
+    paid_at: strOrNull(row.paid_at),
+    created_at: str(row.created_at),
+    products: row.product_title
+      ? {
+          title: str(row.product_title),
+          description: strOrNull(row.product_description),
+          cover_url: strOrNull(row.product_cover_url),
+        }
+      : null,
+    deliveries: row.delivery_id
+      ? [
+          {
+            id: str(row.delivery_id),
+            status: str(row.delivery_status),
+            attempts: num(row.delivery_attempts),
+            sent_at: strOrNull(row.delivery_sent_at),
+            resend_email_id: strOrNull(row.delivery_resend_email_id),
+            last_error: strOrNull(row.delivery_last_error),
+          },
+        ]
+      : null,
+  };
 
   const delivery = order.deliveries?.[0];
 

@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, num, numOrNull, str, strOrNull } from '@/lib/turso/client';
 import { formatDate } from '@/lib/utils';
 import { Send } from 'lucide-react';
 
@@ -28,23 +29,35 @@ interface DeliveryRow {
 }
 
 export default async function DeliveriesPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
-    .from('deliveries')
-    .select(`
-      id, status, attempts, sent_at, last_error, created_at,
-      orders!inner(
-        id, buyer_email, buyer_name, creator_id,
-        products(title)
-      )
-    `)
-    .eq('orders.creator_id', user.id)
-    .order('created_at', { ascending: false });
+  const rows = await queryAll(
+    `SELECT d.id, d.status, d.attempts, d.sent_at, d.last_error, d.created_at,
+            o.id AS order_id, o.buyer_email, o.buyer_name,
+            p.title AS product_title
+     FROM deliveries d
+     INNER JOIN orders o ON o.id = d.order_id
+     LEFT JOIN products p ON p.id = o.product_id
+     WHERE o.creator_id = ?
+     ORDER BY d.created_at DESC`,
+    [user.id]
+  );
 
-  const deliveries = (data ?? []) as unknown as DeliveryRow[];
+  const deliveries: DeliveryRow[] = rows.map((r) => ({
+    id: str(r.id),
+    status: str(r.status),
+    attempts: num(r.attempts),
+    sent_at: strOrNull(r.sent_at),
+    last_error: strOrNull(r.last_error),
+    created_at: str(r.created_at),
+    orders: {
+      id: str(r.order_id),
+      buyer_email: str(r.buyer_email),
+      buyer_name: strOrNull(r.buyer_name),
+      products: r.product_title ? { title: str(r.product_title) } : null,
+    },
+  }));
 
   const counts = {
     total: deliveries.length,

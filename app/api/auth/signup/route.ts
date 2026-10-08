@@ -1,62 +1,62 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server'
+import { db, queryOne, str } from '@/lib/turso/client'
+import { hashPassword } from '@/lib/auth/password'
+import { createSession, encodeSession, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session'
 
-export const runtime = 'nodejs';
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password, displayName } = await req.json();
+    const { email, password, displayName } = await req.json()
 
     if (!email || !password) {
-      return NextResponse.json({ error: 'Email dan password wajib diisi' }, { status: 400 });
+      return NextResponse.json({ error: 'Email dan password wajib diisi' }, { status: 400 })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const normalizedEmail = String(email).toLowerCase().trim()
 
-    // Create user directly via Auth Admin REST API
-    const res = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { display_name: displayName },
-      }),
-    });
-
-    const result = await res.json();
-
-    if (!res.ok) {
-      return NextResponse.json({
-        error: result.msg || result.error || result.message || 'Gagal membuat akun',
-      }, { status: 400 });
+    const existing = await queryOne<{ id: string }>('SELECT id FROM users WHERE email = ?', [
+      normalizedEmail,
+    ])
+    if (existing) {
+      return NextResponse.json({ error: 'Email sudah terdaftar' }, { status: 400 })
     }
 
-    const userId = result.id;
-    if (!userId) {
-      return NextResponse.json({ error: 'Gagal membuat user' }, { status: 500 });
-    }
+    const userId = crypto.randomUUID()
+    const passwordHash = hashPassword(String(password))
 
-    const supabase = createClient(supabaseUrl, serviceKey);
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: userId,
-      email,
-      display_name: displayName || null,
-    });
+    await db().batch(
+      [
+        {
+          sql: 'INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)',
+          args: [userId, normalizedEmail, passwordHash],
+        },
+        {
+          sql: 'INSERT INTO profiles (id, email, display_name) VALUES (?, ?, ?)',
+          args: [userId, normalizedEmail, displayName || null],
+        },
+      ],
+      'write'
+    )
 
-    if (profileError) {
-      return NextResponse.json({ error: profileError.message || 'Gagal menyimpan profil' }, { status: 500 });
-    }
+    const sid = await createSession(userId)
+    const res = NextResponse.json({ user: { id: userId, email: normalizedEmail } })
 
-    return NextResponse.json({ user: { id: userId, email } });
+    res.cookies.set(
+      SESSION_COOKIE,
+      encodeSession({ sid, uid: userId, exp: Date.now() + SESSION_MAX_AGE * 1000 }),
+      {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        maxAge: SESSION_MAX_AGE,
+      }
+    )
+
+    return res
   } catch (err) {
-    console.error('Signup error', err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 });
+    console.error('Signup error', err)
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
   }
 }

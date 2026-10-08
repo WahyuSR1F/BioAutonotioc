@@ -1,12 +1,11 @@
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
 import { redirect } from 'next/navigation';
 import Sidebar from '@/components/dashboard/sidebar';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
 
-  if (!user) redirect('/login');
+  if (!user) redirect('/login?e=1');
 
   return (
     <div className="flex min-h-screen bg-background">

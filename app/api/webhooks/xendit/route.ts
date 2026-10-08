@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { execute, queryOne, str, nowIso } from '@/lib/turso/client';
+import { deliverOrder } from '@/lib/deliver';
+import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
@@ -19,47 +21,35 @@ export async function POST(req: NextRequest) {
         FAILED: 'failed',
       };
       const payment_status = statusMap[status] ?? 'pending';
-      const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-      await supabase
-        .from('orders')
-        .update({ payment_status, raw_webhook: body, updated_at: new Date().toISOString() })
-        .eq('payment_ref', external_id || xenditInvoiceId);
+      await execute(
+        `UPDATE orders SET payment_status = ?, raw_webhook = ?, updated_at = ? WHERE payment_ref = ?`,
+        [payment_status, JSON.stringify(body), nowIso(), external_id || xenditInvoiceId]
+      );
 
       return NextResponse.json({ ok: true });
     }
 
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .update({
-        payment_status: 'paid',
-        paid_at: new Date().toISOString(),
-        raw_webhook: body,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('payment_ref', external_id || xenditInvoiceId)
-      .select('id')
-      .maybeSingle();
+    const order = await queryOne<{ id: string }>(
+      `UPDATE orders
+       SET payment_status = 'paid', paid_at = ?, raw_webhook = ?, updated_at = ?
+       WHERE payment_ref = ?
+       RETURNING id`,
+      [nowIso(), JSON.stringify(body), nowIso(), external_id || xenditInvoiceId]
+    );
 
-    if (orderError || !order) {
-      console.error('Xendit order update failed', orderError);
+    if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    await supabase.from('deliveries').upsert(
-      { order_id: order.id, status: 'pending', updated_at: new Date().toISOString() },
-      { onConflict: 'order_id' }
+    const orderId = str(order.id);
+    await execute(
+      `INSERT INTO deliveries (id, order_id, status, updated_at)
+       VALUES (?, ?, 'pending', ?)
+       ON CONFLICT(order_id) DO UPDATE SET status = 'pending', updated_at = excluded.updated_at`,
+      [randomUUID(), orderId, nowIso()]
     );
 
-    const edgeFnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/deliver-product`;
-    fetch(edgeFnUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ orderId: order.id }),
-    }).catch(console.error);
+    await deliverOrder(orderId);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

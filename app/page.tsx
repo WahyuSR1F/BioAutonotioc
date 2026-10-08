@@ -233,7 +233,7 @@ export default function LandingPage() {
             <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
             Webhook Midtrans & Xendit
             <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-2" />
-            Supabase Storage
+            Turso Database
             <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-2" />
             Email via Resend
           </div>

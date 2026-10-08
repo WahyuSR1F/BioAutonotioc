@@ -1,4 +1,4 @@
-import type { PlatformConfig } from '@/lib/supabase/types';
+import type { PlatformConfig } from '@/lib/types';
 
 export const platforms: PlatformConfig[] = [
   {

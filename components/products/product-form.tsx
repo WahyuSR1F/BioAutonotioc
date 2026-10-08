@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { createClient } from '@/lib/supabase/client';
 import { slugify, formatBytes } from '@/lib/utils';
 
 const schema = z.object({
@@ -31,12 +30,11 @@ interface ProductFormProps {
     cover_url: string | null;
     is_active: boolean;
   };
-  existingFiles?: { id: string; file_name: string; file_size: number | null; storage_path: string }[];
+  existingFiles?: { id: string; file_name: string; file_size: number | null }[];
 }
 
 export default function ProductForm({ defaultValues, existingFiles = [] }: ProductFormProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [productFiles, setProductFiles] = useState<File[]>([]);
   const [coverFile, setCoverFile] = useState<File | null>(null);
@@ -69,87 +67,78 @@ export default function ProductForm({ defaultValues, existingFiles = [] }: Produ
     setProductFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function uploadCover(): Promise<string | null> {
+    if (!coverFile) return null;
+    const formData = new FormData();
+    formData.append('file', coverFile);
+    formData.append('type', 'cover');
+    const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Gagal upload cover');
+    return result.url as string;
+  }
+
+  async function uploadProductFiles(productId: string) {
+    for (const file of productFiles) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', 'file');
+      formData.append('productId', productId);
+      const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const result = await res.json();
+        toast.error(result.error || `Gagal upload ${file.name}`);
+        continue;
+      }
+    }
+  }
+
   async function onSubmit(data: FormData) {
     setLoading(true);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { toast.error('Sesi habis, silakan login ulang'); setLoading(false); return; }
-
     try {
-      let cover_url = defaultValues?.cover_url ?? null;
-
-      if (coverFile) {
-        const ext = coverFile.name.split('.').pop();
-        const path = `covers/${user.id}/${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from('product-files')
-          .upload(path, coverFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('product-files').getPublicUrl(path);
-        cover_url = urlData.publicUrl;
-      }
+      const cover_url = await uploadCover();
 
       if (defaultValues?.id) {
-        const { error } = await supabase
-          .from('products')
-          .update({
+        const res = await fetch(`/api/products/${defaultValues.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             title: data.title,
             description: data.description || null,
             price: Number(data.price),
-            cover_url,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', defaultValues.id);
-        if (error) throw error;
+            cover_url: cover_url ?? defaultValues.cover_url,
+          }),
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Gagal memperbarui produk');
 
-        await uploadProductFiles(user.id, defaultValues.id);
+        await uploadProductFiles(defaultValues.id);
         toast.success('Produk berhasil diperbarui');
         router.push('/dashboard/products');
       } else {
-        const { data: product, error } = await supabase
-          .from('products')
-          .insert({
+        const res = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             title: data.title,
             description: data.description || null,
             price: Number(data.price),
             cover_url,
-          })
-          .select()
-          .single();
-        if (error) throw error;
-
-        await uploadProductFiles(user.id, product.id);
-
-        const slug = `${slugify(data.title)}-${Date.now().toString(36)}`;
-        await supabase.from('payment_links').insert({
-          product_id: product.id,
-          slug,
+          }),
         });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Gagal membuat produk');
+
+        await uploadProductFiles(result.id);
 
         toast.success('Produk berhasil dibuat & payment link ter-generate otomatis!');
-        router.push(`/dashboard/products/${product.id}/links`);
+        router.push(`/dashboard/products/${result.id}/links`);
       }
     } catch (err: any) {
       toast.error(err.message ?? 'Terjadi kesalahan');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function uploadProductFiles(userId: string, productId: string) {
-    for (const file of productFiles) {
-      const path = `${userId}/${productId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from('product-files')
-        .upload(path, file);
-      if (uploadError) { toast.error(`Gagal upload ${file.name}`); continue; }
-      await supabase.from('product_files').insert({
-        product_id: productId,
-        storage_path: path,
-        file_name: file.name,
-        file_size: file.size,
-        mime_type: file.type,
-      });
     }
   }
 
@@ -212,7 +201,7 @@ export default function ProductForm({ defaultValues, existingFiles = [] }: Produ
         >
           <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">Klik atau drag & drop file</p>
-          <p className="text-xs text-muted-foreground/70 mt-1">PDF, ZIP, RAR, dll — akan dikirim ke pembeli</p>
+          <p className="text-xs text-muted-foreground/70 mt-1">PDF, ZIP, RAR, dll — maksimal 4MB per file, akan dikirim ke pembeli</p>
         </div>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFilesChange} />
 

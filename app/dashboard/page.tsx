@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, queryOne, num, str, strOrNull } from '@/lib/turso/client';
 import { formatCurrency } from '@/lib/utils';
 import { TrendingUp, ShoppingCart, Send, Package } from 'lucide-react';
 import RevenueChart from '@/components/dashboard/revenue-chart';
@@ -20,41 +21,40 @@ interface RecentOrder {
 }
 
 async function getStats(userId: string) {
-  const supabase = createClient();
-
-  const [ordersRes, deliveriesRes, productsRes] = await Promise.all([
-    supabase
-      .from('orders')
-      .select('amount, payment_status, created_at')
-      .eq('creator_id', userId),
-    supabase
-      .from('deliveries')
-      .select('status, order_id, orders!inner(creator_id)')
-      .eq('orders.creator_id', userId),
-    supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('creator_id', userId)
-      .eq('is_active', true),
+  const [orders, deliveries, productCount] = await Promise.all([
+    queryAll(
+      'SELECT amount, payment_status, created_at FROM orders WHERE creator_id = ?',
+      [userId]
+    ),
+    queryAll(
+      `SELECT d.status FROM deliveries d
+       INNER JOIN orders o ON o.id = d.order_id
+       WHERE o.creator_id = ?`,
+      [userId]
+    ),
+    queryOne(
+      'SELECT COUNT(*) AS c FROM products WHERE creator_id = ? AND is_active = 1',
+      [userId]
+    ),
   ]);
 
-  const orders = (ordersRes.data ?? []) as OrderRow[];
-  const deliveries = (deliveriesRes.data ?? []) as unknown as { status: string }[];
+  const orderRows = orders as unknown as OrderRow[];
+  const deliveryRows = deliveries as { status: string }[];
 
-  const totalRevenue = orders
+  const totalRevenue = orderRows
     .filter((o) => o.payment_status === 'paid')
     .reduce((sum, o) => sum + Number(o.amount), 0);
 
-  const totalOrders = orders.filter((o) => o.payment_status === 'paid').length;
-  const sentDeliveries = deliveries.filter((d) => d.status === 'sent').length;
-  const activeProducts = productsRes.count ?? 0;
+  const totalOrders = orderRows.filter((o) => o.payment_status === 'paid').length;
+  const sentDeliveries = deliveryRows.filter((d) => d.status === 'sent').length;
+  const activeProducts = productCount ? num((productCount as { c: unknown }).c) : 0;
 
   const chartData: { date: string; revenue: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split('T')[0];
-    const revenue = orders
+    const revenue = orderRows
       .filter((o) => o.payment_status === 'paid' && o.created_at.startsWith(dateStr))
       .reduce((sum, o) => sum + Number(o.amount), 0);
     chartData.push({
@@ -67,20 +67,32 @@ async function getStats(userId: string) {
 }
 
 export default async function DashboardPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
   const stats = await getStats(user.id);
 
-  const { data } = await supabase
-    .from('orders')
-    .select('id, buyer_email, buyer_name, amount, currency, payment_status, created_at, products(title)')
-    .eq('creator_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(5);
+  const rows = await queryAll(
+    `SELECT o.id, o.buyer_email, o.buyer_name, o.amount, o.currency, o.payment_status, o.created_at,
+            p.title AS product_title
+     FROM orders o
+     LEFT JOIN products p ON p.id = o.product_id
+     WHERE o.creator_id = ?
+     ORDER BY o.created_at DESC
+     LIMIT 5`,
+    [user.id]
+  );
 
-  const recentOrders = (data ?? []) as unknown as RecentOrder[];
+  const recentOrders: RecentOrder[] = rows.map((r) => ({
+    id: str(r.id),
+    buyer_email: str(r.buyer_email),
+    buyer_name: strOrNull(r.buyer_name),
+    amount: num(r.amount),
+    currency: str(r.currency),
+    payment_status: str(r.payment_status),
+    created_at: str(r.created_at),
+    products: r.product_title ? { title: str(r.product_title) } : null,
+  }));
 
   const statCards = [
     { label: 'Total Revenue', value: formatCurrency(stats.totalRevenue), icon: TrendingUp, color: 'text-blue-600 bg-blue-50' },

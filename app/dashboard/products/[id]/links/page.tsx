@@ -1,37 +1,42 @@
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, queryOne, bool, str, strOrNull } from '@/lib/turso/client';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import PaymentLinksManager from '@/components/products/payment-links-manager';
-import type { PaymentLink, Product } from '@/lib/supabase/types';
+import type { PaymentLink, Product } from '@/lib/types';
 
 interface Props {
   params: { id: string };
 }
 
 export default async function ProductLinksPage({ params }: Props) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data: productData } = await supabase
-    .from('products')
-    .select('id, title')
-    .eq('id', params.id)
-    .eq('creator_id', user.id)
-    .maybeSingle();
+  const productRow = await queryOne(
+    'SELECT id, title FROM products WHERE id = ? AND creator_id = ?',
+    [params.id, user.id]
+  );
+  if (!productRow) notFound();
 
-  const product = productData as Pick<Product, 'id' | 'title'> | null;
-  if (!product) notFound();
+  const product: Pick<Product, 'id' | 'title'> = {
+    id: str(productRow.id),
+    title: str(productRow.title),
+  };
 
-  const { data: linksData } = await supabase
-    .from('payment_links')
-    .select('id, slug, is_active, created_at')
-    .eq('product_id', params.id)
-    .order('created_at', { ascending: false });
+  const linkRows = await queryAll(
+    'SELECT id, slug, is_active, created_at FROM payment_links WHERE product_id = ? ORDER BY created_at DESC',
+    [params.id]
+  );
 
-  const links = (linksData ?? []) as Pick<PaymentLink, 'id' | 'slug' | 'is_active' | 'created_at'>[];
+  const links: Pick<PaymentLink, 'id' | 'slug' | 'is_active' | 'created_at'>[] = linkRows.map((r) => ({
+    id: str(r.id),
+    slug: str(r.slug),
+    is_active: bool(r.is_active),
+    created_at: str(r.created_at),
+  }));
 
   return (
     <div className="p-8 space-y-6">

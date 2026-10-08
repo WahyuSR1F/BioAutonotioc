@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { execute, queryOne, num, str, strOrNull, nowIso } from '@/lib/turso/client';
 import { MidtransService } from '@/lib/midtrans/service';
+import { randomUUID, randomBytes } from 'crypto';
 
 export const runtime = 'nodejs';
 
+function generatePaymentRef(): string {
+  return `BA-${Date.now()}-${randomBytes(3).toString('hex').toUpperCase()}`;
+}
+
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-  
   if (!process.env.MIDTRANS_SERVER_KEY) {
     return NextResponse.json({ error: 'Midtrans tidak dikonfigurasi' }, { status: 500 });
   }
-  
+
   try {
     const { productId, paymentLinkId, buyerName, buyerEmail, paymentProvider } = await req.json();
 
@@ -25,110 +25,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Payment provider tidak valid' }, { status: 400 });
     }
 
-    const productResult = await supabase
-      .from('products')
-      .select('id, title, price, currency, description, creator_id, is_active')
-      .eq('id', productId)
-      .eq('is_active', true)
-      .maybeSingle();
+    const productRow = await queryOne(
+      'SELECT id, title, price, currency, description, creator_id, is_active FROM products WHERE id = ? AND is_active = 1',
+      [productId]
+    );
 
-    if (productResult.error || !productResult.data) {
+    if (!productRow) {
       return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 });
     }
 
-    const product = productResult.data;
+    const paymentRef = generatePaymentRef();
+    const orderId = randomUUID();
 
-    let orderResult = null as any;
-    
-    for (let i = 0; i < 2; i++) {
-      try {
-        orderResult = await supabase
-          .from('orders')
-          .insert({
-            product_id: productId,
-            creator_id: product.creator_id,
-            payment_link_id: paymentLinkId || null,
-            buyer_email: buyerEmail,
-            buyer_name: buyerName || null,
-            amount: product.price,
-            currency: product.currency,
-            payment_provider: paymentProvider,
-            payment_ref: orderResult?.data?.payment_ref,
-            payment_status: 'pending',
-          })
-          .select()
-          .single();
-        break;
-      } catch (e: any) {
-        if (i === 0) {
-          const paymentRef = `BA-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-          orderResult = await supabase
-            .from('orders')
-            .insert({
-              product_id: productId,
-              creator_id: product.creator_id,
-              payment_link_id: paymentLinkId || null,
-              buyer_email: buyerEmail,
-              buyer_name: buyerName || null,
-              amount: product.price,
-              currency: product.currency,
-              payment_provider: paymentProvider,
-              payment_ref: paymentRef,
-              payment_status: 'pending',
-            })
-            .select()
-            .single();
-        }
-      }
-    }
-
-    if (orderResult.error || !orderResult.data) {
-      return NextResponse.json({ error: 'Gagal membuat pesanan' }, { status: 500 });
-    }
-
-    const order = orderResult.data;
+    await execute(
+      `INSERT INTO orders
+         (id, product_id, creator_id, payment_link_id, buyer_email, buyer_name,
+          amount, currency, payment_provider, payment_ref, payment_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      [
+        orderId,
+        productId,
+        str(productRow.creator_id),
+        paymentLinkId || null,
+        String(buyerEmail),
+        buyerName || null,
+        num(productRow.price),
+        str(productRow.currency),
+        paymentProvider,
+        paymentRef,
+        nowIso(),
+        nowIso(),
+      ]
+    );
 
     if (paymentProvider === 'midtrans') {
       const paymentResponse = await MidtransService.createSnapTransaction({
-        orderId: order.payment_ref,
-        grossAmount: order.amount,
+        orderId: paymentRef,
+        grossAmount: num(productRow.price),
         customerName: buyerName || 'ANONYMOUS',
         customerEmail: buyerEmail,
-        productName: product.title,
-        productDescription: product.description || '',
-        productPrice: order.amount,
+        productName: str(productRow.title),
+        productDescription: strOrNull(productRow.description) || '',
+        productPrice: num(productRow.price),
       });
 
       if (paymentResponse.status === 'error') {
         console.error('Midtrans payment creation error:', paymentResponse.message);
-        return NextResponse.json({ 
-          error: 'Gagal membuat transaksi pembayaran', 
-          details: paymentResponse.message 
+        return NextResponse.json({
+          error: 'Gagal membuat transaksi pembayaran',
+          details: paymentResponse.message
         }, { status: 500 });
       }
 
       return NextResponse.json({
-        orderId: order.id,
-        paymentRef: order.payment_ref,
+        orderId,
+        paymentRef,
         paymentUrl: paymentResponse.redirect_url,
         redirect: true,
       });
     }
 
-    const orderUpdateResult = await supabase
-      .from('orders')
-      .update({ payment_ref: order.payment_ref })
-      .eq('id', order.id)
-      .select()
-      .single();
-
-    if (orderUpdateResult.error || !orderUpdateResult.data) {
-      return NextResponse.json({ error: 'Gagal memperbarui pesanan' }, { status: 500 });
-    }
-
     return NextResponse.json({
-      orderId: orderUpdateResult.data.id,
-      paymentRef: orderUpdateResult.data.payment_ref,
+      orderId,
+      paymentRef,
       message: `Pesanan berhasil dibuat untuk ${paymentProvider}. URL pembayaran akan dikirim ke email.`,
     });
   } catch (err: any) {

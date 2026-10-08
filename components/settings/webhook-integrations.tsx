@@ -14,9 +14,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { createClient } from '@/lib/supabase/client';
 import { platforms } from '@/lib/platforms';
-import type { WebhookIntegration } from '@/lib/supabase/types';
+import type { WebhookIntegration } from '@/lib/types';
 
 interface Props {
   integrations: WebhookIntegration[];
@@ -58,7 +57,6 @@ function PlatformCard({
   integration: WebhookIntegration | null;
   appUrl: string;
 }) {
-  const supabase = createClient();
   const router = useRouter();
   const [verifying, setVerifying] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -69,48 +67,39 @@ function PlatformCard({
 
   async function handleReset() {
     setResetting(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { toast.error('Sesi habis'); setResetting(false); return; }
 
-    const token = Array.from({ length: 48 }, () =>
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('');
+    const res = await fetch('/api/webhook-integrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: platform.id }),
+    });
 
-    const { error } = await supabase
-      .from('webhook_integrations')
-      .upsert({
-        creator_id: user.id,
-        platform: platform.id,
-        webhook_token: token,
-        is_connected: false,
-        first_payload: null,
-        connected_at: null,
-        platform_username: null,
-        updated_at: new Date().toISOString(),
-      });
+    const result = await res.json();
 
-    if (error) { toast.error(error.message); }
-    else { toast.success('Token diperbarui'); router.refresh(); }
+    if (!res.ok) {
+      toast.error(result.error || 'Gagal mereset token');
+    } else {
+      toast.success('Token diperbarui');
+      router.refresh();
+    }
     setResetting(false);
   }
 
   async function handleVerify() {
     setVerifying(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { toast.error('Sesi habis'); setVerifying(false); return; }
 
-    const { data, error } = await supabase
-      .from('webhook_integrations')
-      .select('is_connected, platform_username, first_payload')
-      .eq('creator_id', user.id)
-      .eq('platform', platform.id)
-      .maybeSingle();
+    const res = await fetch(`/api/webhook-integrations?platform=${platform.id}`);
+    const result = await res.json();
 
-    if (error) { toast.error(error.message); }
-    else if (data?.is_connected) {
-      toast.success(`Koneksi ${platform.name} aktif!`);
+    if (!res.ok) {
+      toast.error(result.error || 'Gagal memverifikasi');
     } else {
-      toast.error('Belum ada data masuk. Lakukan transaksi uji coba dulu.');
+      const data = result.integrations?.[0];
+      if (data?.is_connected) {
+        toast.success(`Koneksi ${platform.name} aktif!`);
+      } else {
+        toast.error('Belum ada data masuk. Lakukan transaksi uji coba dulu.');
+      }
     }
     setVerifying(false);
   }

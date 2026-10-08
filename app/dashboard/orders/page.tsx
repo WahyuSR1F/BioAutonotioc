@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, num, str, strOrNull } from '@/lib/turso/client';
 import Link from 'next/link';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { ShoppingCart } from 'lucide-react';
@@ -38,22 +39,34 @@ interface OrderRow {
 }
 
 export default async function OrdersPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
-    .from('orders')
-    .select(`
-      id, buyer_email, buyer_name, amount, currency,
-      payment_status, payment_provider, created_at,
-      products(title),
-      deliveries(status)
-    `)
-    .eq('creator_id', user.id)
-    .order('created_at', { ascending: false });
+  const rows = await queryAll(
+    `SELECT o.id, o.buyer_email, o.buyer_name, o.amount, o.currency,
+            o.payment_status, o.payment_provider, o.created_at,
+            p.title AS product_title,
+            d.status AS delivery_status
+     FROM orders o
+     LEFT JOIN products p ON p.id = o.product_id
+     LEFT JOIN deliveries d ON d.order_id = o.id
+     WHERE o.creator_id = ?
+     ORDER BY o.created_at DESC`,
+    [user.id]
+  );
 
-  const orders = (data ?? []) as unknown as OrderRow[];
+  const orders: OrderRow[] = rows.map((r) => ({
+    id: str(r.id),
+    buyer_email: str(r.buyer_email),
+    buyer_name: strOrNull(r.buyer_name),
+    amount: num(r.amount),
+    currency: str(r.currency),
+    payment_status: str(r.payment_status),
+    payment_provider: str(r.payment_provider),
+    created_at: str(r.created_at),
+    products: r.product_title ? { title: str(r.product_title) } : null,
+    deliveries: r.delivery_status ? [{ status: str(r.delivery_status) }] : null,
+  }));
 
   return (
     <div className="p-8 space-y-6">

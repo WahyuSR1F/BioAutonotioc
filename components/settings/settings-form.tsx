@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { createClient } from '@/lib/supabase/client';
 
 const profileSchema = z.object({
   display_name: z.string().min(2, 'Nama minimal 2 karakter'),
@@ -35,7 +34,6 @@ interface Props {
 }
 
 export default function SettingsForm({ profile }: Props) {
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const { register, handleSubmit, formState: { errors } } = useForm<ProfileData>({
@@ -49,21 +47,24 @@ export default function SettingsForm({ profile }: Props) {
 
   async function onSubmit(data: ProfileData) {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { toast.error('Sesi habis'); setLoading(false); return; }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({
+    const res = await fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         display_name: data.display_name,
         bio: data.bio || null,
         store_slug: data.store_slug || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
+      }),
+    });
 
+    const result = await res.json();
     setLoading(false);
-    if (error) { toast.error(error.message); return; }
+
+    if (!res.ok) {
+      toast.error(result.error || 'Gagal menyimpan profil');
+      return;
+    }
     toast.success('Profil berhasil disimpan');
   }
 
@@ -162,9 +163,9 @@ export default function SettingsForm({ profile }: Props) {
         </p>
         <div className="space-y-2">
           {[
-            'NEXT_PUBLIC_SUPABASE_URL',
-            'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-            'SUPABASE_SERVICE_ROLE_KEY',
+            'TURSO_DATABASE_URL',
+            'TURSO_AUTH_TOKEN',
+            'AUTH_SECRET',
             'MIDTRANS_SERVER_KEY',
             'XENDIT_CALLBACK_TOKEN',
             'RESEND_API_KEY',

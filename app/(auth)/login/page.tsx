@@ -11,7 +11,6 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createClient } from '@/lib/supabase/client';
 
 const schema = z.object({
   email: z.string().email('Email tidak valid'),
@@ -23,7 +22,6 @@ type FormData = z.infer<typeof schema>;
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const supabase = createClient();
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -31,16 +29,18 @@ export default function LoginPage() {
 
   async function onSubmit(data: FormData) {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: data.email,
-      password: data.password,
+
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: data.email, password: data.password }),
     });
+
+    const result = await res.json();
     setLoading(false);
 
-    if (error) {
-      toast.error(error.message === 'Invalid login credentials'
-        ? 'Email atau password salah'
-        : error.message);
+    if (!res.ok) {
+      toast.error(result.error || 'Email atau password salah');
       return;
     }
 

@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { execute, queryOne, bool, str, strOrNull, nowIso } from '@/lib/turso/client';
 import { getPlatform } from '@/lib/platforms';
 
 export const runtime = 'nodejs';
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,34 +18,32 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = await req.json();
-    const supabase = getSupabase();
 
-    const { data: integration, error: findError } = await supabase
-      .from('webhook_integrations')
-      .select('id, creator_id, is_connected')
-      .eq('webhook_token', token)
-      .eq('platform', platform)
-      .maybeSingle();
+    const integration = await queryOne<{ id: string; is_connected: unknown }>(
+      'SELECT id, creator_id, is_connected FROM webhook_integrations WHERE webhook_token = ? AND platform = ?',
+      [token, platform]
+    );
 
-    if (findError || !integration) {
+    if (!integration) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 404 });
     }
 
-    const updateData: Record<string, unknown> = {
-      first_payload: payload,
-      updated_at: new Date().toISOString(),
-    };
+    const connected = bool(integration.is_connected);
+    const username = payload.username || payload.buyer_name || null;
 
-    if (!integration.is_connected) {
-      updateData.is_connected = true;
-      updateData.connected_at = new Date().toISOString();
-      updateData.platform_username = payload.username || payload.buyer_name || null;
+    if (!connected) {
+      await execute(
+        `UPDATE webhook_integrations
+         SET first_payload = ?, updated_at = ?, is_connected = 1, connected_at = ?, platform_username = ?
+         WHERE id = ?`,
+        [JSON.stringify(payload), nowIso(), nowIso(), username, str(integration.id)]
+      );
+    } else {
+      await execute(
+        `UPDATE webhook_integrations SET first_payload = ?, updated_at = ? WHERE id = ?`,
+        [JSON.stringify(payload), nowIso(), str(integration.id)]
+      );
     }
-
-    await supabase
-      .from('webhook_integrations')
-      .update(updateData)
-      .eq('id', integration.id);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

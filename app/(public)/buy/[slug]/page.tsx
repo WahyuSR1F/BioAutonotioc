@@ -1,8 +1,8 @@
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { queryOne, bool, num, str, strOrNull } from '@/lib/turso/client';
 import CheckoutForm from '@/components/checkout/checkout-form';
 import { formatCurrency } from '@/lib/utils';
-import type { PaymentLink, Product } from '@/lib/supabase/types';
+import type { Product } from '@/lib/types';
 import { Package } from 'lucide-react';
 import Image from 'next/image';
 
@@ -11,27 +11,30 @@ interface Props {
 }
 
 export default async function BuyPage({ params }: Props) {
-  const supabase = createClient();
-
-  const { data } = await supabase
-    .from('payment_links')
-    .select('id, product_id')
-    .eq('slug', params.slug)
-    .eq('is_active', true)
-    .maybeSingle();
-
-  const link = data as PaymentLink | null;
+  const link = await queryOne(
+    'SELECT id, product_id FROM payment_links WHERE slug = ? AND is_active = 1',
+    [params.slug]
+  );
   if (!link) notFound();
 
-  const { data: productData } = await supabase
-    .from('products')
-    .select('id, title, description, price, currency, cover_url, is_active')
-    .eq('id', link.product_id)
-    .eq('is_active', true)
-    .maybeSingle();
+  const productRow = await queryOne(
+    'SELECT id, title, description, price, currency, cover_url, is_active FROM products WHERE id = ? AND is_active = 1',
+    [str(link.product_id)]
+  );
+  if (!productRow) notFound();
 
-  const product = productData as Product | null;
-  if (!product) notFound();
+  const product: Product = {
+    id: str(productRow.id),
+    creator_id: '',
+    title: str(productRow.title),
+    description: strOrNull(productRow.description),
+    price: num(productRow.price),
+    currency: str(productRow.currency),
+    cover_url: strOrNull(productRow.cover_url),
+    is_active: bool(productRow.is_active),
+    created_at: '',
+    updated_at: '',
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12">
@@ -78,7 +81,7 @@ export default async function BuyPage({ params }: Props) {
         <div>
           <CheckoutForm
             productId={product.id}
-            paymentLinkId={link.id}
+            paymentLinkId={str(link.id)}
             productTitle={product.title}
             price={product.price}
             currency={product.currency}

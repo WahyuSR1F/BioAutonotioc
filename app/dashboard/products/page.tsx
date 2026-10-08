@@ -1,32 +1,41 @@
-import { createClient } from '@/lib/supabase/server';
+import { getUser } from '@/lib/auth/me';
+import { queryAll, bool, num, str, strOrNull } from '@/lib/turso/client';
 import Link from 'next/link';
 import { Plus, Package, ToggleLeft, ToggleRight, Link2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/utils';
 import Image from 'next/image';
-import type { Product } from '@/lib/supabase/types';
+import type { Product } from '@/lib/types';
 
 interface ProductRow extends Pick<Product, 'id' | 'title' | 'price' | 'currency' | 'cover_url' | 'is_active'> {
-  orders: { count: number }[];
-  payment_links: { count: number }[];
+  order_count: number;
+  link_count: number;
 }
 
 export default async function ProductsPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
-    .from('products')
-    .select(`
-      id, title, description, price, currency, cover_url, is_active, created_at,
-      payment_links(count),
-      orders(count)
-    `)
-    .eq('creator_id', user.id)
-    .order('created_at', { ascending: false });
+  const rows = await queryAll(
+    `SELECT p.id, p.title, p.price, p.currency, p.cover_url, p.is_active,
+            (SELECT COUNT(*) FROM orders o WHERE o.product_id = p.id) AS order_count,
+            (SELECT COUNT(*) FROM payment_links l WHERE l.product_id = p.id) AS link_count
+     FROM products p
+     WHERE p.creator_id = ?
+     ORDER BY p.created_at DESC`,
+    [user.id]
+  );
 
-  const products = (data ?? []) as unknown as ProductRow[];
+  const products: ProductRow[] = rows.map((r) => ({
+    id: str(r.id),
+    title: str(r.title),
+    price: num(r.price),
+    currency: str(r.currency),
+    cover_url: strOrNull(r.cover_url),
+    is_active: bool(r.is_active),
+    order_count: num(r.order_count),
+    link_count: num(r.link_count),
+  }));
 
   return (
     <div className="p-8 space-y-6">
@@ -60,8 +69,8 @@ export default async function ProductsPage() {
       ) : (
         <div className="grid gap-4">
           {products.map((product) => {
-            const orderCount = product.orders?.[0]?.count ?? 0;
-            const linkCount = product.payment_links?.[0]?.count ?? 0;
+            const orderCount = product.order_count;
+            const linkCount = product.link_count;
             return (
               <div key={product.id} className="bg-white rounded-2xl border border-border p-5 flex items-center gap-5">
                 {/* Cover */}

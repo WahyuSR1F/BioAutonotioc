@@ -1,50 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { execute, queryOne, num, str, nowIso } from '@/lib/turso/client';
+import { getUserFromStore } from '@/lib/auth/me';
+import { deliverOrder } from '@/lib/deliver';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const serviceSupabase = createServiceClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getUserFromStore(cookies());
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { deliveryId } = await req.json();
   if (!deliveryId) return NextResponse.json({ error: 'deliveryId required' }, { status: 400 });
 
-  const { data: delivery, error } = await serviceSupabase
-    .from('deliveries')
-    .select('id, attempts, order_id, orders!inner(creator_id)')
-    .eq('id', deliveryId)
-    .maybeSingle();
+  const delivery = await queryOne<{
+    id: string;
+    attempts: unknown;
+    order_id: string;
+    creator_id: string;
+  }>(
+    `SELECT d.id, d.attempts, d.order_id, o.creator_id
+     FROM deliveries d
+     INNER JOIN orders o ON o.id = d.order_id
+     WHERE d.id = ?`,
+    [deliveryId]
+  );
 
-  if (error || !delivery) return NextResponse.json({ error: 'Delivery not found' }, { status: 404 });
+  if (!delivery) return NextResponse.json({ error: 'Delivery not found' }, { status: 404 });
 
-  const order = delivery.orders as any;
-  if (order.creator_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (str(delivery.creator_id) !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
-  if (delivery.attempts >= 5) {
+  if (num(delivery.attempts) >= 5) {
     return NextResponse.json({ error: 'Maksimal 5 percobaan sudah tercapai' }, { status: 400 });
   }
 
-  await serviceSupabase
-    .from('deliveries')
-    .update({ status: 'pending', updated_at: new Date().toISOString() })
-    .eq('id', deliveryId);
+  await execute(`UPDATE deliveries SET status = 'pending', updated_at = ? WHERE id = ?`, [
+    nowIso(),
+    str(delivery.id),
+  ]);
 
-  const edgeFnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/deliver-product`;
-  fetch(edgeFnUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-    },
-    body: JSON.stringify({ orderId: delivery.order_id }),
-  }).catch(console.error);
+  await deliverOrder(str(delivery.order_id));
 
   return NextResponse.json({ ok: true });
 }
