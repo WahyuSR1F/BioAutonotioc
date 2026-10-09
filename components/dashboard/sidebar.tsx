@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Package,
   ShoppingCart,
+  CreditCard,
   Send,
   Settings,
   Zap,
@@ -18,6 +19,7 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { href: '/dashboard/products', label: 'Produk', icon: Package },
   { href: '/dashboard/orders', label: 'Pesanan', icon: ShoppingCart },
+  { href: '/dashboard/payments', label: 'Pembayaran', icon: CreditCard },
   { href: '/dashboard/deliveries', label: 'Pengiriman', icon: Send },
   { href: '/dashboard/settings', label: 'Pengaturan', icon: Settings },
 ];

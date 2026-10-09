@@ -30,16 +30,29 @@ interface Props {
   paymentLinkId: string;
   productTitle: string;
   price: number;
+  adminFee: number;
+  total: number;
   currency: string;
+  providers: Array<'midtrans' | 'xendit'>;
 }
 
-export default function CheckoutForm({ productId, paymentLinkId, productTitle, price, currency }: Props) {
+export default function CheckoutForm({
+  productId,
+  paymentLinkId,
+  productTitle,
+  price,
+  adminFee,
+  total,
+  currency,
+  providers,
+}: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const availableProviders = providers.length > 0 ? providers : [];
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { paymentProvider: 'midtrans' },
+    defaultValues: { paymentProvider: availableProviders[0] ?? 'midtrans' },
   });
 
   const provider = watch('paymentProvider');
@@ -106,44 +119,67 @@ export default function CheckoutForm({ productId, paymentLinkId, productTitle, p
 
         <div className="space-y-2">
           <Label>Metode Pembayaran</Label>
-          <RadioGroup
-            value={provider}
-            onValueChange={(v) => setValue('paymentProvider', v as 'midtrans' | 'xendit')}
-            className="grid grid-cols-2 gap-3"
-          >
-            {(['midtrans', 'xendit'] as const).map((p) => (
-              <label
-                key={p}
-                htmlFor={p}
-                className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
-                  provider === p ? 'border-primary bg-accent' : 'border-border hover:border-primary/30'
-                }`}
-              >
-                <RadioGroupItem value={p} id={p} />
-                <div>
-                  <p className="text-sm font-medium capitalize">{p}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {p === 'midtrans' ? 'Transfer, QRIS, VA' : 'QRIS, VA, Kartu'}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </RadioGroup>
+          {availableProviders.length === 0 ? (
+            <div className="p-3 rounded-xl border border-dashed border-border bg-secondary/40">
+              <p className="text-sm text-muted-foreground">
+                Metode pembayaran sedang tidak tersedia. Silakan coba lagi nanti.
+              </p>
+            </div>
+          ) : (
+            <RadioGroup
+              value={provider}
+              onValueChange={(v) => setValue('paymentProvider', v as 'midtrans' | 'xendit')}
+              className="grid grid-cols-2 gap-3"
+            >
+              {availableProviders.map((p) => (
+                <label
+                  key={p}
+                  htmlFor={p}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
+                    provider === p ? 'border-primary bg-accent' : 'border-border hover:border-primary/30'
+                  }`}
+                >
+                  <RadioGroupItem value={p} id={p} />
+                  <div>
+                    <p className="text-sm font-medium capitalize">{p}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {p === 'midtrans' ? 'Transfer, QRIS, VA' : 'QRIS, VA, Kartu'}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </RadioGroup>
+          )}
         </div>
 
-        <div className="pt-2 border-t border-border">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-muted-foreground">Total Pembayaran</span>
-            <span className="text-xl font-bold text-primary">{formatCurrency(price, currency)}</span>
+        <div className="pt-2 border-t border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Harga produk</span>
+            <span className="text-sm text-foreground">{formatCurrency(price, currency)}</span>
+          </div>
+          {adminFee > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Biaya admin</span>
+              <span className="text-sm text-foreground">{formatCurrency(adminFee, currency)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between pt-2 border-t border-border/70">
+            <span className="text-sm font-medium text-foreground">Total Pembayaran</span>
+            <span className="text-xl font-bold text-primary">{formatCurrency(total, currency)}</span>
           </div>
 
-          <Button type="submit" className="w-full gap-2" size="lg" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full gap-2 mt-2"
+            size="lg"
+            disabled={loading || availableProviders.length === 0}
+          >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {loading ? 'Memproses...' : `Bayar ${formatCurrency(price, currency)}`}
+            {loading ? 'Memproses...' : `Bayar ${formatCurrency(total, currency)}`}
           </Button>
         </div>
       </form>

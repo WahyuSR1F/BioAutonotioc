@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execute, queryOne, num, str, strOrNull, nowIso } from '@/lib/turso/client';
 import { MidtransService } from '@/lib/midtrans/service';
+import { getPaymentSettings, computeTotals, getEnabledProviders } from '@/lib/payments';
 import { randomUUID, randomBytes } from 'crypto';
 
 export const runtime = 'nodejs';
@@ -34,14 +35,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 });
     }
 
+    // Admin fee dihitung ulang di server — tidak pernah dipercaya dari client
+    const settings = await getPaymentSettings(str(productRow.creator_id));
+    const enabledProviders = getEnabledProviders(settings);
+    if (!enabledProviders.includes(paymentProvider)) {
+      return NextResponse.json(
+        { error: 'Metode pembayaran tidak tersedia' },
+        { status: 400 }
+      );
+    }
+
+    const totals = computeTotals(num(productRow.price), settings);
+
     const paymentRef = generatePaymentRef();
     const orderId = randomUUID();
 
     await execute(
       `INSERT INTO orders
          (id, product_id, creator_id, payment_link_id, buyer_email, buyer_name,
-          amount, currency, payment_provider, payment_ref, payment_status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          amount, admin_fee, currency, payment_provider, payment_ref, payment_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       [
         orderId,
         productId,
@@ -49,7 +62,8 @@ export async function POST(req: NextRequest) {
         paymentLinkId || null,
         String(buyerEmail),
         buyerName || null,
-        num(productRow.price),
+        totals.total,
+        totals.fee,
         str(productRow.currency),
         paymentProvider,
         paymentRef,
@@ -59,14 +73,40 @@ export async function POST(req: NextRequest) {
     );
 
     if (paymentProvider === 'midtrans') {
+      const itemDetails: Array<{
+        id: string;
+        price: number;
+        quantity: number;
+        name: string;
+        brand?: string;
+      }> = [
+        {
+          id: `${orderId}-item`,
+          price: totals.price,
+          quantity: 1,
+          name: str(productRow.title),
+          brand: 'BioAutomate',
+        },
+      ];
+      if (totals.fee > 0) {
+        itemDetails.push({
+          id: `${orderId}-fee`,
+          price: totals.fee,
+          quantity: 1,
+          name: 'Biaya admin',
+        });
+      }
+
       const paymentResponse = await MidtransService.createSnapTransaction({
         orderId: paymentRef,
-        grossAmount: num(productRow.price),
+        grossAmount: totals.total,
         customerName: buyerName || 'ANONYMOUS',
         customerEmail: buyerEmail,
         productName: str(productRow.title),
         productDescription: strOrNull(productRow.description) || '',
-        productPrice: num(productRow.price),
+        productPrice: totals.price,
+        adminFee: totals.fee,
+        itemDetails,
       });
 
       if (paymentResponse.status === 'error') {

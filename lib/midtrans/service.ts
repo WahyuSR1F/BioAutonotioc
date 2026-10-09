@@ -1,5 +1,13 @@
 import { midtransClient, isSandbox, appUrl } from '../midtrans';
 
+export interface MidtransItemDetail {
+  id: string;
+  price: number;
+  quantity: number;
+  name: string;
+  brand?: string;
+}
+
 export interface MidtransPaymentDetails {
   orderId: string;
   grossAmount: number;
@@ -8,6 +16,10 @@ export interface MidtransPaymentDetails {
   productName: string;
   productDescription: string;
   productPrice: number;
+  /** Biaya admin yang ditambahkan ke total (0 bila tanpa biaya) */
+  adminFee?: number;
+  /** Rincian item; harus jumlahnya sama dengan grossAmount. Bila kosong, dibuat otomatis. */
+  itemDetails?: MidtransItemDetail[];
 }
 
 export interface MidtransSnapResponse {
@@ -28,6 +40,23 @@ export class MidtransService {
     details: MidtransPaymentDetails
   ): Promise<MidtransSnapResponse> {
     try {
+      const adminFee = Math.max(0, Math.round(details.adminFee || 0));
+      const itemDetails: MidtransItemDetail[] =
+        details.itemDetails && details.itemDetails.length > 0
+          ? details.itemDetails
+          : [
+              {
+                id: details.orderId,
+                price: details.productPrice,
+                quantity: 1,
+                name: details.productName,
+                brand: 'BioAutomate',
+              },
+              ...(adminFee > 0
+                ? [{ id: `${details.orderId}-fee`, price: adminFee, quantity: 1, name: 'Biaya admin' }]
+                : []),
+            ];
+
       const transactionDetails = {
         transaction_details: {
           order_id: details.orderId,
@@ -37,15 +66,7 @@ export class MidtransService {
           first_name: details.customerName,
           email: details.customerEmail,
         },
-        item_details: [
-          {
-            id: details.orderId,
-            price: details.productPrice,
-            quantity: 1,
-            name: details.productName,
-            brand: 'BioAutomate',
-          },
-        ],
+        item_details: itemDetails,
         expiration: {
           minute: 15,
         },

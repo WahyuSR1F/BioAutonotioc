@@ -82,7 +82,7 @@ export default function PaymentLinksManager({ productId, productTitle, initialLi
 
       {links.length === 0 ? (
         <div className="text-center py-10 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
-          Belum ada payment link. Klik "Generate Link" untuk membuat.
+          Belum ada payment link. Klik &quot;Generate Link&quot; untuk membuat.
         </div>
       ) : (
         <div className="space-y-3">

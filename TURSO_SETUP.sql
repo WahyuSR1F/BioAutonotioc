@@ -70,9 +70,9 @@ CREATE TABLE IF NOT EXISTS orders (
   product_id       TEXT NOT NULL REFERENCES products(id),
   creator_id       TEXT NOT NULL REFERENCES users(id),
   payment_link_id  TEXT REFERENCES payment_links(id),
-  buyer_email      TEXT NOT NULL,
-  buyer_name       TEXT,
+  buyer_email      TEXT NOT NULL,  buyer_name      TEXT,
   amount           REAL NOT NULL,
+  admin_fee        REAL NOT NULL DEFAULT 0,
   currency         TEXT NOT NULL DEFAULT 'IDR',
   payment_provider TEXT NOT NULL CHECK (payment_provider IN ('midtrans','xendit')),
   payment_ref      TEXT,
@@ -114,6 +114,17 @@ CREATE TABLE IF NOT EXISTS webhook_integrations (
   created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE (creator_id, platform)
+);
+
+-- Setelan pembayaran per creator: toggle provider + komponen admin fee
+CREATE TABLE IF NOT EXISTS payment_settings (
+  creator_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  midtrans_enabled  INTEGER NOT NULL DEFAULT 1,
+  xendit_enabled    INTEGER NOT NULL DEFAULT 1,
+  admin_fee_percent REAL NOT NULL DEFAULT 0 CHECK (admin_fee_percent >= 0 AND admin_fee_percent <= 100),
+  admin_fee_flat    REAL NOT NULL DEFAULT 0 CHECK (admin_fee_flat >= 0),
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 -- Asset statis publik (cover produk) — konten file disimpan sebagai BLOB

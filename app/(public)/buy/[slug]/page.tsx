@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { queryOne, bool, num, str, strOrNull } from '@/lib/turso/client';
+import { getPaymentSettings, computeTotals, getEnabledProviders } from '@/lib/payments';
 import CheckoutForm from '@/components/checkout/checkout-form';
 import { formatCurrency } from '@/lib/utils';
 import type { Product } from '@/lib/types';
@@ -18,10 +19,15 @@ export default async function BuyPage({ params }: Props) {
   if (!link) notFound();
 
   const productRow = await queryOne(
-    'SELECT id, title, description, price, currency, cover_url, is_active FROM products WHERE id = ? AND is_active = 1',
+    'SELECT id, creator_id, title, description, price, currency, cover_url, is_active FROM products WHERE id = ? AND is_active = 1',
     [str(link.product_id)]
   );
   if (!productRow) notFound();
+
+  // Setelan pembayaran creator: provider aktif + komponen admin fee
+  const settings = await getPaymentSettings(str(productRow.creator_id));
+  const totals = computeTotals(num(productRow.price), settings);
+  const providers = getEnabledProviders(settings);
 
   const product: Product = {
     id: str(productRow.id),
@@ -61,10 +67,18 @@ export default async function BuyPage({ params }: Props) {
               {product.description && (
                 <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{product.description}</p>
               )}
-              <div className="mt-4 pt-4 border-t border-border">
+              <div className="mt-4 pt-4 border-t border-border space-y-1">
                 <span className="text-3xl font-bold text-primary">
-                  {formatCurrency(product.price, product.currency)}
+                  {formatCurrency(totals.price, product.currency)}
                 </span>
+                {totals.fee > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    + biaya admin {formatCurrency(totals.fee, product.currency)} → total{' '}
+                    <span className="font-semibold text-foreground">
+                      {formatCurrency(totals.total, product.currency)}
+                    </span>
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -83,8 +97,11 @@ export default async function BuyPage({ params }: Props) {
             productId={product.id}
             paymentLinkId={str(link.id)}
             productTitle={product.title}
-            price={product.price}
+            price={totals.price}
+            adminFee={totals.fee}
+            total={totals.total}
             currency={product.currency}
+            providers={providers}
           />
         </div>
       </div>
