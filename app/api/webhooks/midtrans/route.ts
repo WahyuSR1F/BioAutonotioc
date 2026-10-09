@@ -17,6 +17,21 @@ function verifyMidtransSignature(
   return computed === incomingSignature;
 }
 
+/**
+ * GET hanya health-check — webhook Midtrans sendiri selalu POST.
+ * Mencegah halaman error saat URL dicek manual di browser.
+ */
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: true,
+      service: 'midtrans-webhook',
+      message: 'Endpoint aktif. Kirim notifikasi via POST (dari Midtrans) ke URL ini.',
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
