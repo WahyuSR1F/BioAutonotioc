@@ -1,6 +1,7 @@
 // Deklarasi tipe untuk library resmi `midtrans-client` (package-nya tidak menyertakan .d.ts).
 // Hanya memuat permukaan API yang dipakai proyek ini: Snap.createTransaction
-// (dan wrapper-nya) serta Core.transaction.status.
+// (dan wrapper-nya) serta CoreApi.transaction.status.
+// Catatan: package v1.4.3 mengekspor `CoreApi` (bukan `Core`).
 declare module 'midtrans-client' {
   export interface MidtransClientOptions {
     isProduction: boolean;
@@ -50,7 +51,7 @@ declare module 'midtrans-client' {
     createTransactionRedirectUrl(parameter: CreateTransactionParameter): Promise<string>;
   }
 
-  export class Core {
+  export class CoreApi {
     constructor(options: MidtransClientOptions);
     transaction: {
       status(parameter: { order_id: string }): Promise<Record<string, unknown>>;
@@ -59,7 +60,7 @@ declare module 'midtrans-client' {
 
   const midtransClient: {
     Snap: typeof Snap;
-    Core: typeof Core;
+    CoreApi: typeof CoreApi;
   };
 
   export default midtransClient;

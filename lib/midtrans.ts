@@ -45,14 +45,23 @@ const MAIN_SERVER_KEY = MIDTRANS_SERVER_KEY.trim();
 const MAIN_CLIENT_KEY = (MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || '').trim();
 
 /**
+ * Nilai placeholder (salinan dari .env.example, mis. "your-midtrans-server-key")
+ * tidak dianggap key sungguhan — kalau lolos, API membalas 401 Unauthorized.
+ */
+function isPlaceholderKey(key: string): boolean {
+  const k = key.trim().toLowerCase();
+  return k.includes('your-') || k.includes('your_');
+}
+
+/**
  * Pilih key untuk `mode`: var khusus menang; jika tidak ada, pakai var umum
  * asalkan environment key cocok dengan mode (atau tidak terdeteksi).
  * Mengembalikan '' bila key untuk mode itu belum tersedia.
  */
 function pickKey(perMode: string, main: string, mode: MidtransMode): string {
   const dedicated = perMode.trim();
-  if (dedicated) return dedicated;
-  if (!main) return '';
+  if (dedicated && !isPlaceholderKey(dedicated)) return dedicated;
+  if (!main || isPlaceholderKey(main)) return '';
   const env = detectMidtransKeyEnvironment(main);
   if (env === null || env === mode) return main;
   return '';
@@ -112,7 +121,7 @@ export function getMidtransMisconfiguration(mode: MidtransMode = resolveMidtrans
     }
     return {
       code: 'missing_key',
-      message: `MIDTRANS_SERVER_KEY${mode === 'sandbox' ? '_SANDBOX' : ''} belum di-set di environment variable server. Ambil dari dashboard Midtrans → Settings → Access Keys.`,
+      message: `MIDTRANS_SERVER_KEY${mode === 'sandbox' ? '_SANDBOX' : ''} belum di-set (atau masih berisi placeholder) di environment variable server. Ambil Server Key asli dari dashboard Midtrans → Settings → Access Keys.`,
     };
   }
   if (/^SB-Mid-/.test(key) || /^Mid-/.test(key)) {
@@ -128,7 +137,7 @@ export function getMidtransMisconfiguration(mode: MidtransMode = resolveMidtrans
 // Lazy-init per mode: library resmi memvalidasi serverKey di constructor, jadi
 // klien dibuat saat pertama dipakai (bukan saat import — aman saat build tanpa key).
 const snapInstances = new Map<MidtransMode, InstanceType<typeof midtransClient.Snap>>();
-const coreInstances = new Map<MidtransMode, InstanceType<typeof midtransClient.Core>>();
+const coreInstances = new Map<MidtransMode, InstanceType<typeof midtransClient.CoreApi>>();
 
 /** Klien Snap resmi (midtrans-client) untuk membuat transaksi/token pada mode tertentu. */
 export function getSnap(
@@ -149,10 +158,10 @@ export function getSnap(
 /** Klien Core resmi (midtrans-client) untuk cek status transaksi pada mode tertentu. */
 export function getCore(
   mode: MidtransMode = resolveMidtransMode()
-): InstanceType<typeof midtransClient.Core> {
+): InstanceType<typeof midtransClient.CoreApi> {
   let instance = coreInstances.get(mode);
   if (!instance) {
-    instance = new midtransClient.Core({
+    instance = new midtransClient.CoreApi({
       isProduction: mode === 'production',
       serverKey: getServerKey(mode),
       clientKey: getClientKey(mode),
