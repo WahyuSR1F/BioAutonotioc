@@ -1,4 +1,4 @@
-import { midtransClient, isSandbox, appUrl } from '../midtrans';
+import { getSnap, getCore } from '../midtrans';
 
 export interface MidtransItemDetail {
   id: string;
@@ -72,7 +72,8 @@ export class MidtransService {
         },
       };
 
-      const result = await midtransClient.snap.createTransactionRedirectUrl(transactionDetails);
+      // Library resmi midtrans-client: Snap.createTransaction → { token, redirect_url }
+      const result = await getSnap().createTransaction(transactionDetails);
 
       return {
         redirect_url: result.redirect_url,
@@ -96,7 +97,7 @@ export class MidtransService {
    */
   static async getTransactionStatus(orderId: string): Promise<any> {
     try {
-      const result = await midtransClient.status(orderId);
+      const result = await getCore().transaction.status({ order_id: orderId });
       return result;
     } catch (error: any) {
       console.error('Midtrans Get Transaction Status error:', error);

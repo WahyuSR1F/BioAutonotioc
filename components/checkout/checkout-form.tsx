@@ -25,6 +25,50 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+declare global {
+  interface Window {
+    snap?: {
+      pay: (
+        token: string,
+        callbacks?: {
+          onSuccess?: (result?: unknown) => void;
+          onPending?: (result?: unknown) => void;
+          onError?: (result?: unknown) => void;
+          onClose?: () => void;
+        }
+      ) => void;
+    };
+  }
+}
+
+let snapScriptPromise: Promise<void> | null = null;
+
+/** Muat Snap.js (Midtrans) sekali per halaman */
+function loadSnapScript(isProduction: boolean, clientKey: string): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Snap.js hanya bisa dimuat di browser'));
+  }
+  if (window.snap) return Promise.resolve();
+  if (!snapScriptPromise) {
+    snapScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = isProduction
+        ? 'https://app.midtrans.com/snap/snap.js'
+        : 'https://app.sandbox.midtrans.com/snap/snap.js';
+      script.setAttribute('data-client-key', clientKey);
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        snapScriptPromise = null;
+        script.remove();
+        reject(new Error('Gagal memuat Snap.js'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return snapScriptPromise;
+}
+
 interface Props {
   productId: string;
   paymentLinkId: string;
@@ -34,6 +78,9 @@ interface Props {
   total: number;
   currency: string;
   providers: Array<'midtrans' | 'xendit'>;
+  /** Client key publik Midtrans untuk popup Snap (opsional) */
+  midtransClientKey?: string;
+  midtransIsProduction?: boolean;
 }
 
 export default function CheckoutForm({
@@ -45,6 +92,8 @@ export default function CheckoutForm({
   total,
   currency,
   providers,
+  midtransClientKey = '',
+  midtransIsProduction = false,
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -79,8 +128,32 @@ export default function CheckoutForm({
         return;
       }
 
-      if (result.paymentUrl) {
-        window.location.href = result.paymentUrl;
+      // Midtrans: utamakan popup Snap JS (token), fallback ke redirect_url
+      if (data.paymentProvider === 'midtrans' && result.token && midtransClientKey) {
+        try {
+          await loadSnapScript(midtransIsProduction, midtransClientKey);
+        } catch {
+          // Snap.js gagal dimuat — fallback redirect
+          const url = result.redirect_url || result.paymentUrl;
+          if (url) {
+            window.location.href = url;
+            return;
+          }
+        }
+        if (window.snap) {
+          window.snap.pay(String(result.token), {
+            onSuccess: () => router.push('/success'),
+            onPending: () => router.push('/success'),
+            onError: () => toast.error('Pembayaran gagal. Silakan coba lagi.'),
+            onClose: () => setLoading(false),
+          });
+          return;
+        }
+      }
+
+      const paymentUrl = result.redirect_url || result.paymentUrl;
+      if (paymentUrl) {
+        window.location.href = paymentUrl;
       } else {
         router.push('/success');
       }

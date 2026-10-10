@@ -29,6 +29,15 @@ export default async function BuyPage({ params }: Props) {
   const totals = computeTotals(num(productRow.price), settings);
   const providers = getEnabledProviders(settings);
 
+  // Kunci publik Snap.js (untuk popup Midtrans) — opsional;
+  // bila kosong, frontend otomatis redirect ke redirect_url.
+  const midtransClientKey =
+    process.env.MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || '';
+  const midtransFlag = (process.env.MIDTRANS_IS_PRODUCTION || '').trim().toLowerCase();
+  const midtransIsProduction =
+    midtransFlag === 'true' ||
+    (midtransFlag !== 'false' && process.env.MIDTRANS_ENVIRONMENT === 'PRODUCTION');
+
   const product: Product = {
     id: str(productRow.id),
     creator_id: '',
@@ -102,6 +111,8 @@ export default async function BuyPage({ params }: Props) {
             total={totals.total}
             currency={product.currency}
             providers={providers}
+            midtransClientKey={midtransClientKey}
+            midtransIsProduction={midtransIsProduction}
           />
         </div>
       </div>

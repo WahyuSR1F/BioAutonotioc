@@ -117,10 +117,13 @@ export async function POST(req: NextRequest) {
         }, { status: 500 });
       }
 
+      // token untuk Snap JS popup, redirect_url untuk buka langsung
       return NextResponse.json({
         orderId,
         paymentRef,
-        paymentUrl: paymentResponse.redirect_url,
+        token: paymentResponse.token ?? null,
+        redirect_url: paymentResponse.redirect_url ?? null,
+        paymentUrl: paymentResponse.redirect_url, // alias kompatibilitas frontend lama
         redirect: true,
       });
     }

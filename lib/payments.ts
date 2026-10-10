@@ -133,7 +133,13 @@ export function getProviderEnvStatus(): ProviderEnvStatus {
   return {
     midtrans: {
       configured: midtransKey.length > 0,
-      environment: process.env.MIDTRANS_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+      // MIDTRANS_IS_PRODUCTION diprioritaskan; fallback ke MIDTRANS_ENVIRONMENT (konfigurasi lama)
+      environment: ((): string => {
+        const flag = (process.env.MIDTRANS_IS_PRODUCTION || '').trim().toLowerCase();
+        if (flag === 'true') return 'PRODUCTION';
+        if (flag === 'false') return 'SANDBOX';
+        return process.env.MIDTRANS_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX';
+      })(),
       keyPreview: maskKey(midtransKey),
     },
     xendit: {
