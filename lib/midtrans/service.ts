@@ -1,3 +1,4 @@
+import type { CreateTransactionParameter } from 'midtrans-client';
 import { getSnap, getCore, resolveMidtransMode, type MidtransMode } from '../midtrans';
 
 export interface MidtransItemDetail {
@@ -20,6 +21,8 @@ export interface MidtransPaymentDetails {
   adminFee?: number;
   /** Rincian item; harus jumlahnya sama dengan grossAmount. Bila kosong, dibuat otomatis. */
   itemDetails?: MidtransItemDetail[];
+  /** Kode kanal Snap (enabled_payments) yang boleh dipakai pembeli; kosong = semua kanal aktif. */
+  enabledPayments?: string[];
 }
 
 export interface MidtransSnapResponse {
@@ -58,7 +61,7 @@ export class MidtransService {
                 : []),
             ];
 
-      const transactionDetails = {
+      const transactionDetails: CreateTransactionParameter = {
         transaction_details: {
           order_id: details.orderId,
           gross_amount: details.grossAmount,
@@ -72,6 +75,12 @@ export class MidtransService {
           minute: 15,
         },
       };
+
+      // Batasi kanal pembayaran bila creator memilih kanal tertentu di dashboard
+      const enabled = (details.enabledPayments || []).filter(Boolean);
+      if (enabled.length > 0) {
+        transactionDetails.enabled_payments = enabled;
+      }
 
       // Library resmi midtrans-client: Snap.createTransaction → { token, redirect_url }
       const result = await getSnap(mode).createTransaction(transactionDetails);

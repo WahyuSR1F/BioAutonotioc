@@ -42,9 +42,11 @@ const settingsCols = hasSettings
   ? (await db.execute(`PRAGMA table_info(payment_settings)`)).rows.map((r) => String(r.name))
   : [];
 const hasMidtransMode = settingsCols.includes('midtrans_mode');
+const hasMidtransChannels = settingsCols.includes('midtrans_channels');
 console.log('payment_settings:', hasSettings ? 'ada' : 'TIDAK ADA');
 console.log('orders.admin_fee:', hasFee ? 'ada' : 'TIDAK ADA');
 console.log('payment_settings.midtrans_mode:', hasMidtransMode ? 'ada' : 'TIDAK ADA');
+console.log('payment_settings.midtrans_channels:', hasMidtransChannels ? 'ada' : 'TIDAK ADA');
 
 if (!apply) {
   console.log('mode --check: tidak ada perubahan');
@@ -74,6 +76,14 @@ if (hasSettings && !hasMidtransMode) {
   console.log('OK: kolom payment_settings.midtrans_mode ditambahkan');
 } else if (hasMidtransMode) {
   console.log('SKIP: payment_settings.midtrans_mode sudah ada');
+}
+
+if (hasSettings && !hasMidtransChannels) {
+  // JSON array kode kanal Snap (enabled_payments); NULL/kosong = ikuti semua kanal aktif di Midtrans
+  await db.execute(`ALTER TABLE payment_settings ADD COLUMN midtrans_channels TEXT`);
+  console.log('OK: kolom payment_settings.midtrans_channels ditambahkan');
+} else if (hasMidtransChannels) {
+  console.log('SKIP: payment_settings.midtrans_channels sudah ada');
 }
 
 if (!hasFee) {

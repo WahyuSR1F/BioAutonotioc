@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
           productPrice: totals.price,
           adminFee: totals.fee,
           itemDetails,
+          enabledPayments: settings.midtransChannels,
         },
         settings.midtransMode
       );

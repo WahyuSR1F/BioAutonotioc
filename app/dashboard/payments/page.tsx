@@ -161,6 +161,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
         settings={{
           midtransEnabled: settings.midtransEnabled,
           midtransMode: settings.midtransMode,
+          midtransChannels: settings.midtransChannels,
           xenditEnabled: settings.xenditEnabled,
           adminFeePercent: settings.adminFeePercent,
           adminFeeFlat: settings.adminFeeFlat,

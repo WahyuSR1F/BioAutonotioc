@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { getUserFromStore } from '@/lib/auth/me';
-import { getPaymentSettings, savePaymentSettings, getProviderEnvStatus } from '@/lib/payments';
+import { getPaymentSettings, savePaymentSettings, getProviderEnvStatus, filterMidtransChannels } from '@/lib/payments';
 
 export const runtime = 'nodejs';
 
 const schema = z.object({
   midtransEnabled: z.boolean(),
   midtransMode: z.enum(['sandbox', 'production']).optional(),
+  midtransChannels: z.array(z.string()).max(30).optional(),
   xenditEnabled: z.boolean(),
   adminFeePercent: z.coerce.number().min(0, 'Persen minimal 0').max(100, 'Persen maksimal 100'),
   adminFeeFlat: z.coerce.number().min(0, 'Biaya tetap minimal 0').max(1_000_000_000, 'Biaya tetap terlalu besar'),
@@ -47,6 +48,7 @@ export async function PUT(req: NextRequest) {
     creatorId: user.id,
     midtransEnabled: Boolean(parsed.data.midtransEnabled),
     midtransMode: parsed.data.midtransMode ?? existing.midtransMode,
+    midtransChannels: filterMidtransChannels(parsed.data.midtransChannels ?? existing.midtransChannels),
     xenditEnabled: Boolean(parsed.data.xenditEnabled),
     adminFeePercent: parsed.data.adminFeePercent,
     adminFeeFlat: parsed.data.adminFeeFlat,

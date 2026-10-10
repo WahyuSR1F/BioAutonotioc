@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CreditCard, Loader2, Percent, Save, ShieldCheck, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { MIDTRANS_CHANNEL_OPTIONS } from '@/lib/midtrans-channels';
 import { formatCurrency } from '@/lib/utils';
 
 type MidtransMode = 'sandbox' | 'production';
@@ -29,6 +31,8 @@ export interface EnvStatus {
 export interface SettingsValue {
   midtransEnabled: boolean;
   midtransMode: MidtransMode;
+  /** Kode kanal Snap yang ditampilkan di checkout; kosong = ikuti semua kanal aktif di Midtrans. */
+  midtransChannels: string[];
   xenditEnabled: boolean;
   adminFeePercent: number;
   adminFeeFlat: number;
@@ -46,6 +50,7 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
   const [loading, setLoading] = useState(false);
   const [midtransEnabled, setMidtransEnabled] = useState(settings.midtransEnabled);
   const [midtransMode, setMidtransMode] = useState<MidtransMode>(settings.midtransMode);
+  const [midtransChannels, setMidtransChannels] = useState<string[]>(settings.midtransChannels);
   const [xenditEnabled, setXenditEnabled] = useState(settings.xenditEnabled);
   const [percent, setPercent] = useState(String(settings.adminFeePercent));
   const [flat, setFlat] = useState(String(settings.adminFeeFlat));
@@ -63,6 +68,7 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
         body: JSON.stringify({
           midtransEnabled,
           midtransMode,
+          midtransChannels,
           xenditEnabled,
           adminFeePercent: percentNum,
           adminFeeFlat: flatNum,
@@ -225,6 +231,50 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
             RESEND_API_KEY belum diatur — file produk tidak akan terkirim otomatis ke pembeli.
           </p>
+        )}
+
+        {/* Kanal Midtrans (enabled_payments) */}
+        {midtransEnabled && (
+          <div className="p-4 rounded-xl border border-border bg-secondary/30 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Kanal Pembayaran Midtrans</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Centang kanal yang ditampilkan saat checkout. Kosong = ikuti semua kanal yang
+                aktif di dashboard Midtrans.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+              {MIDTRANS_CHANNEL_OPTIONS.map((ch) => {
+                const checked = midtransChannels.includes(ch.code);
+                return (
+                  <label
+                    key={ch.code}
+                    className="flex items-center gap-2 text-sm text-foreground cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) =>
+                        setMidtransChannels((prev) =>
+                          v
+                            ? prev.includes(ch.code)
+                              ? prev
+                              : [...prev, ch.code]
+                            : prev.filter((c) => c !== ch.code)
+                        )
+                      }
+                      aria-label={ch.label}
+                    />
+                    {ch.label}
+                  </label>
+                );
+              })}
+            </div>
+            {midtransChannels.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Tanpa filter — pembeli melihat semua kanal yang aktif di Midtrans.
+              </p>
+            )}
+          </div>
         )}
       </div>
 

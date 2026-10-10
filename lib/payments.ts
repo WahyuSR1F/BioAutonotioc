@@ -10,11 +10,32 @@ import { deliverOrder } from '@/lib/deliver';
 
 export type PaymentProvider = 'midtrans' | 'xendit';
 
+export {
+  MIDTRANS_CHANNEL_OPTIONS,
+  filterMidtransChannels,
+  type MidtransChannelOption,
+} from '@/lib/midtrans-channels';
+import { filterMidtransChannels } from '@/lib/midtrans-channels';
+
+function parseMidtransChannels(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    return filterMidtransChannels(JSON.parse(value));
+  } catch {
+    return [];
+  }
+}
+
 export interface PaymentSettings {
   creatorId: string;
   midtransEnabled: boolean;
   /** Mode Midtrans creator: 'sandbox' | 'production' — menentukan key & endpoint yang dipakai. */
   midtransMode: MidtransMode;
+  /**
+   * Kanal Snap yang ditampilkan di checkout (enabled_payments).
+   * Array kosong = tanpa filter (ikuti semua kanal yang aktif di Midtrans).
+   */
+  midtransChannels: string[];
   xenditEnabled: boolean;
   adminFeePercent: number;
   adminFeeFlat: number;
@@ -62,6 +83,7 @@ export function normalizeSettings(row: Record<string, unknown> | null, creatorId
         : bool(row.midtrans_enabled)
       : true,
     midtransMode: mode ?? resolveMidtransMode(),
+    midtransChannels: row ? parseMidtransChannels(row.midtrans_channels) : [],
     xenditEnabled: row
       ? row.xendit_enabled === undefined
         ? true
@@ -87,6 +109,7 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
     {
       midtrans_enabled: settings.midtransEnabled ? 1 : 0,
       midtrans_mode: settings.midtransMode,
+      midtrans_channels: JSON.stringify(filterMidtransChannels(settings.midtransChannels)),
       xendit_enabled: settings.xenditEnabled ? 1 : 0,
       admin_fee_percent: settings.adminFeePercent,
       admin_fee_flat: settings.adminFeeFlat,
@@ -96,11 +119,12 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
 
   await execute(
     `INSERT INTO payment_settings
-       (creator_id, midtrans_enabled, midtrans_mode, xendit_enabled, admin_fee_percent, admin_fee_flat, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (creator_id, midtrans_enabled, midtrans_mode, midtrans_channels, xendit_enabled, admin_fee_percent, admin_fee_flat, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(creator_id) DO UPDATE SET
        midtrans_enabled = excluded.midtrans_enabled,
        midtrans_mode    = excluded.midtrans_mode,
+       midtrans_channels = excluded.midtrans_channels,
        xendit_enabled   = excluded.xendit_enabled,
        admin_fee_percent = excluded.admin_fee_percent,
        admin_fee_flat    = excluded.admin_fee_flat,
@@ -109,6 +133,7 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
       normalized.creatorId,
       normalized.midtransEnabled ? 1 : 0,
       normalized.midtransMode,
+      JSON.stringify(normalized.midtransChannels),
       normalized.xenditEnabled ? 1 : 0,
       normalized.adminFeePercent,
       normalized.adminFeeFlat,
