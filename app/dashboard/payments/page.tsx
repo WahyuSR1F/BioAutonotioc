@@ -160,6 +160,7 @@ export default async function PaymentsPage({ searchParams }: Props) {
       <PaymentSettingsCard
         settings={{
           midtransEnabled: settings.midtransEnabled,
+          midtransMode: settings.midtransMode,
           xenditEnabled: settings.xenditEnabled,
           adminFeePercent: settings.adminFeePercent,
           adminFeeFlat: settings.adminFeeFlat,

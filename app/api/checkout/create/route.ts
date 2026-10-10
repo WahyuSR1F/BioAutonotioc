@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execute, queryOne, num, str, strOrNull, nowIso } from '@/lib/turso/client';
 import { MidtransService } from '@/lib/midtrans/service';
+import { getMidtransMisconfiguration } from '@/lib/midtrans';
 import { getPaymentSettings, computeTotals, getEnabledProviders } from '@/lib/payments';
 import { randomUUID, randomBytes } from 'crypto';
 
@@ -11,10 +12,6 @@ function generatePaymentRef(): string {
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.MIDTRANS_SERVER_KEY) {
-    return NextResponse.json({ error: 'Midtrans tidak dikonfigurasi' }, { status: 500 });
-  }
-
   try {
     const { productId, paymentLinkId, buyerName, buyerEmail, paymentProvider } = await req.json();
 
@@ -43,6 +40,16 @@ export async function POST(req: NextRequest) {
         { error: 'Metode pembayaran tidak tersedia' },
         { status: 400 }
       );
+    }
+
+    if (paymentProvider === 'midtrans') {
+      const misconfig = getMidtransMisconfiguration(settings.midtransMode);
+      if (misconfig) {
+        return NextResponse.json(
+          { error: 'Pembayaran Midtrans belum siap', details: misconfig.message },
+          { status: 503 }
+        );
+      }
     }
 
     const totals = computeTotals(num(productRow.price), settings);
@@ -97,23 +104,30 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const paymentResponse = await MidtransService.createSnapTransaction({
-        orderId: paymentRef,
-        grossAmount: totals.total,
-        customerName: buyerName || 'ANONYMOUS',
-        customerEmail: buyerEmail,
-        productName: str(productRow.title),
-        productDescription: strOrNull(productRow.description) || '',
-        productPrice: totals.price,
-        adminFee: totals.fee,
-        itemDetails,
-      });
+      const paymentResponse = await MidtransService.createSnapTransaction(
+        {
+          orderId: paymentRef,
+          grossAmount: totals.total,
+          customerName: buyerName || 'ANONYMOUS',
+          customerEmail: buyerEmail,
+          productName: str(productRow.title),
+          productDescription: strOrNull(productRow.description) || '',
+          productPrice: totals.price,
+          adminFee: totals.fee,
+          itemDetails,
+        },
+        settings.midtransMode
+      );
 
       if (paymentResponse.status === 'error') {
         console.error('Midtrans payment creation error:', paymentResponse.message);
+        const raw = String(paymentResponse.message || '');
+        const details = /401|unauthorized/i.test(raw)
+          ? `Midtrans menolak kredensial (401 Unauthorized) pada mode ${settings.midtransMode.toUpperCase()}. Periksa Server Key di dashboard Midtrans → Settings → Access Keys, dan samakan key dengan mode (Sandbox/Production) di setelan pembayaran.`
+          : raw;
         return NextResponse.json({
           error: 'Gagal membuat transaksi pembayaran',
-          details: paymentResponse.message
+          details
         }, { status: 500 });
       }
 

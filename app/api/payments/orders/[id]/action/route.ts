@@ -53,6 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (action === 'sync') {
     const result = await syncMidtransOrder({
       id: orderId,
+      creatorId: str(order.creator_id),
       paymentRef: str(order.payment_ref),
       amount: num(order.amount),
       provider: str(order.payment_provider),

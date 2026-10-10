@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execute, queryOne, str, nowIso } from '@/lib/turso/client';
 import { deliverOrder } from '@/lib/deliver';
-import { createHash, randomUUID } from 'crypto';
+import { getConfiguredServerKeys } from '@/lib/midtrans';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 
 export const runtime = 'nodejs';
 
@@ -14,7 +15,9 @@ function verifyMidtransSignature(
 ): boolean {
   const raw = `${orderId}${statusCode}${grossAmount}${serverKey}`;
   const computed = createHash('sha512').update(raw).digest('hex');
-  return computed === incomingSignature;
+  const a = Buffer.from(computed, 'hex');
+  const b = Buffer.from(String(incomingSignature || ''), 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /**
@@ -45,8 +48,12 @@ export async function POST(req: NextRequest) {
       signature_key,
     } = body;
 
-    const serverKey = process.env.MIDTRANS_SERVER_KEY!;
-    if (!verifyMidtransSignature(order_id, status_code, gross_amount, serverKey, signature_key)) {
+    // Notifikasi bisa datang dari transaksi sandbox ATAU production — coba semua key yang terpasang
+    const serverKeys = getConfiguredServerKeys();
+    const signatureValid = serverKeys.some((key) =>
+      verifyMidtransSignature(order_id, status_code, gross_amount, key, signature_key)
+    );
+    if (!signatureValid) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 

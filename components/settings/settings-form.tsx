@@ -167,6 +167,7 @@ export default function SettingsForm({ profile }: Props) {
             'TURSO_AUTH_TOKEN',
             'AUTH_SECRET',
             'MIDTRANS_SERVER_KEY',
+            'MIDTRANS_SERVER_KEY_SANDBOX',
             'XENDIT_CALLBACK_TOKEN',
             'RESEND_API_KEY',
             'NEXT_PUBLIC_APP_URL',

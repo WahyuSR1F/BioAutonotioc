@@ -120,6 +120,8 @@ CREATE TABLE IF NOT EXISTS webhook_integrations (
 CREATE TABLE IF NOT EXISTS payment_settings (
   creator_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   midtrans_enabled  INTEGER NOT NULL DEFAULT 1,
+  -- mode Midtrans creator: 'sandbox' | 'production' (NULL = ikut MIDTRANS_IS_PRODUCTION di env)
+  midtrans_mode     TEXT CHECK (midtrans_mode IN ('sandbox','production')),
   xendit_enabled    INTEGER NOT NULL DEFAULT 1,
   admin_fee_percent REAL NOT NULL DEFAULT 0 CHECK (admin_fee_percent >= 0 AND admin_fee_percent <= 100),
   admin_fee_flat    REAL NOT NULL DEFAULT 0 CHECK (admin_fee_flat >= 0),

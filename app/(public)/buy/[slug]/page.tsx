@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { queryOne, bool, num, str, strOrNull } from '@/lib/turso/client';
 import { getPaymentSettings, computeTotals, getEnabledProviders } from '@/lib/payments';
+import { getClientKey } from '@/lib/midtrans';
 import CheckoutForm from '@/components/checkout/checkout-form';
 import { formatCurrency } from '@/lib/utils';
 import type { Product } from '@/lib/types';
@@ -29,14 +30,10 @@ export default async function BuyPage({ params }: Props) {
   const totals = computeTotals(num(productRow.price), settings);
   const providers = getEnabledProviders(settings);
 
-  // Kunci publik Snap.js (untuk popup Midtrans) — opsional;
+  // Kunci publik Snap.js (untuk popup Midtrans) — mengikuti mode creator;
   // bila kosong, frontend otomatis redirect ke redirect_url.
-  const midtransClientKey =
-    process.env.MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || '';
-  const midtransFlag = (process.env.MIDTRANS_IS_PRODUCTION || '').trim().toLowerCase();
-  const midtransIsProduction =
-    midtransFlag === 'true' ||
-    (midtransFlag !== 'false' && process.env.MIDTRANS_ENVIRONMENT === 'PRODUCTION');
+  const midtransClientKey = getClientKey(settings.midtransMode);
+  const midtransIsProduction = settings.midtransMode === 'production';
 
   const product: Product = {
     id: str(productRow.id),

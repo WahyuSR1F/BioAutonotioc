@@ -38,8 +38,13 @@ const colNames = ordersCols.rows.map((r) => String(r.name));
 
 const hasSettings = tableNames.includes('payment_settings');
 const hasFee = colNames.includes('admin_fee');
+const settingsCols = hasSettings
+  ? (await db.execute(`PRAGMA table_info(payment_settings)`)).rows.map((r) => String(r.name))
+  : [];
+const hasMidtransMode = settingsCols.includes('midtrans_mode');
 console.log('payment_settings:', hasSettings ? 'ada' : 'TIDAK ADA');
 console.log('orders.admin_fee:', hasFee ? 'ada' : 'TIDAK ADA');
+console.log('payment_settings.midtrans_mode:', hasMidtransMode ? 'ada' : 'TIDAK ADA');
 
 if (!apply) {
   console.log('mode --check: tidak ada perubahan');
@@ -51,6 +56,7 @@ if (!hasSettings) {
     CREATE TABLE payment_settings (
       creator_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       midtrans_enabled  INTEGER NOT NULL DEFAULT 1,
+      midtrans_mode     TEXT CHECK (midtrans_mode IN ('sandbox','production')),
       xendit_enabled    INTEGER NOT NULL DEFAULT 1,
       admin_fee_percent REAL NOT NULL DEFAULT 0 CHECK (admin_fee_percent >= 0 AND admin_fee_percent <= 100),
       admin_fee_flat    REAL NOT NULL DEFAULT 0 CHECK (admin_fee_flat >= 0),
@@ -61,6 +67,13 @@ if (!hasSettings) {
   console.log('OK: tabel payment_settings dibuat');
 } else {
   console.log('SKIP: payment_settings sudah ada');
+}
+
+if (hasSettings && !hasMidtransMode) {
+  await db.execute(`ALTER TABLE payment_settings ADD COLUMN midtrans_mode TEXT CHECK (midtrans_mode IN ('sandbox','production'))`);
+  console.log('OK: kolom payment_settings.midtrans_mode ditambahkan');
+} else if (hasMidtransMode) {
+  console.log('SKIP: payment_settings.midtrans_mode sudah ada');
 }
 
 if (!hasFee) {

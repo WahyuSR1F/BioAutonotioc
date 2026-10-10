@@ -1,4 +1,4 @@
-import { getSnap, getCore } from '../midtrans';
+import { getSnap, getCore, resolveMidtransMode, type MidtransMode } from '../midtrans';
 
 export interface MidtransItemDetail {
   id: string;
@@ -37,7 +37,8 @@ export class MidtransService {
    * @returns Midtrans transaction response with redirect URL
    */
   static async createSnapTransaction(
-    details: MidtransPaymentDetails
+    details: MidtransPaymentDetails,
+    mode: MidtransMode = resolveMidtransMode()
   ): Promise<MidtransSnapResponse> {
     try {
       const adminFee = Math.max(0, Math.round(details.adminFee || 0));
@@ -73,7 +74,7 @@ export class MidtransService {
       };
 
       // Library resmi midtrans-client: Snap.createTransaction → { token, redirect_url }
-      const result = await getSnap().createTransaction(transactionDetails);
+      const result = await getSnap(mode).createTransaction(transactionDetails);
 
       return {
         redirect_url: result.redirect_url,
@@ -95,9 +96,12 @@ export class MidtransService {
    * @param orderId Order ID or transaction ID
    * @returns Transaction status details
    */
-  static async getTransactionStatus(orderId: string): Promise<any> {
+  static async getTransactionStatus(
+    orderId: string,
+    mode: MidtransMode = resolveMidtransMode()
+  ): Promise<any> {
     try {
-      const result = await getCore().transaction.status({ order_id: orderId });
+      const result = await getCore(mode).transaction.status({ order_id: orderId });
       return result;
     } catch (error: any) {
       console.error('Midtrans Get Transaction Status error:', error);

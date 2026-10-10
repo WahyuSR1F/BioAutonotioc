@@ -1,5 +1,11 @@
 import { queryOne, execute, str, bool, num, nowIso } from '@/lib/turso/client';
 import { MidtransService } from '@/lib/midtrans/service';
+import {
+  resolveMidtransMode,
+  getServerKey,
+  detectMidtransKeyEnvironment,
+  type MidtransMode,
+} from '@/lib/midtrans';
 import { deliverOrder } from '@/lib/deliver';
 
 export type PaymentProvider = 'midtrans' | 'xendit';
@@ -7,6 +13,8 @@ export type PaymentProvider = 'midtrans' | 'xendit';
 export interface PaymentSettings {
   creatorId: string;
   midtransEnabled: boolean;
+  /** Mode Midtrans creator: 'sandbox' | 'production' — menentukan key & endpoint yang dipakai. */
+  midtransMode: MidtransMode;
   xenditEnabled: boolean;
   adminFeePercent: number;
   adminFeeFlat: number;
@@ -38,16 +46,29 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
+function parseMidtransMode(value: unknown): MidtransMode | null {
+  const v = String(value ?? '').trim().toLowerCase();
+  if (v === 'sandbox' || v === 'production') return v;
+  return null;
+}
+
 export function normalizeSettings(row: Record<string, unknown> | null, creatorId: string): PaymentSettings {
-  if (!row) {
-    return { creatorId, ...DEFAULT_PAYMENT_SETTINGS };
-  }
+  const mode = row ? parseMidtransMode(row.midtrans_mode) : null;
   return {
     creatorId,
-    midtransEnabled: row.midtrans_enabled === undefined ? true : bool(row.midtrans_enabled),
-    xenditEnabled: row.xendit_enabled === undefined ? true : bool(row.xendit_enabled),
-    adminFeePercent: clamp(num(row.admin_fee_percent), 0, 100),
-    adminFeeFlat: clamp(num(row.admin_fee_flat), 0, 1_000_000_000),
+    midtransEnabled: row
+      ? row.midtrans_enabled === undefined
+        ? true
+        : bool(row.midtrans_enabled)
+      : true,
+    midtransMode: mode ?? resolveMidtransMode(),
+    xenditEnabled: row
+      ? row.xendit_enabled === undefined
+        ? true
+        : bool(row.xendit_enabled)
+      : true,
+    adminFeePercent: row ? clamp(num(row.admin_fee_percent), 0, 100) : 0,
+    adminFeeFlat: row ? clamp(num(row.admin_fee_flat), 0, 1_000_000_000) : 0,
   };
 }
 
@@ -65,6 +86,7 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
   const normalized = normalizeSettings(
     {
       midtrans_enabled: settings.midtransEnabled ? 1 : 0,
+      midtrans_mode: settings.midtransMode,
       xendit_enabled: settings.xenditEnabled ? 1 : 0,
       admin_fee_percent: settings.adminFeePercent,
       admin_fee_flat: settings.adminFeeFlat,
@@ -74,10 +96,11 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
 
   await execute(
     `INSERT INTO payment_settings
-       (creator_id, midtrans_enabled, xendit_enabled, admin_fee_percent, admin_fee_flat, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+       (creator_id, midtrans_enabled, midtrans_mode, xendit_enabled, admin_fee_percent, admin_fee_flat, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(creator_id) DO UPDATE SET
        midtrans_enabled = excluded.midtrans_enabled,
+       midtrans_mode    = excluded.midtrans_mode,
        xendit_enabled   = excluded.xendit_enabled,
        admin_fee_percent = excluded.admin_fee_percent,
        admin_fee_flat    = excluded.admin_fee_flat,
@@ -85,6 +108,7 @@ export async function savePaymentSettings(settings: PaymentSettings): Promise<Pa
     [
       normalized.creatorId,
       normalized.midtransEnabled ? 1 : 0,
+      normalized.midtransMode,
       normalized.xenditEnabled ? 1 : 0,
       normalized.adminFeePercent,
       normalized.adminFeeFlat,
@@ -115,9 +139,23 @@ export function computeTotals(price: number, settings: FeeInput): FeeBreakdown {
 }
 
 export interface ProviderEnvStatus {
-  midtrans: { configured: boolean; environment: string; keyPreview: string | null };
+  midtrans: {
+    /** Mode default dari env (MIDTRANS_IS_PRODUCTION) — nilai awal sebelum disimpan per creator. */
+    defaultMode: MidtransMode;
+    /** Status Server Key per mode; key salah satu mode boleh kosong (cukup satu untuk jalan). */
+    modes: Record<MidtransMode, MidtransModeStatus>;
+    /** true bila ada minimal satu Server Key terpasang. */
+    configured: boolean;
+  };
   xendit: { configured: boolean; keyPreview: string | null };
   resend: { configured: boolean };
+}
+
+export interface MidtransModeStatus {
+  configured: boolean;
+  keyPreview: string | null;
+  /** Environment asal key (deteksi prefix SB-/VT-); null bila tidak dikenali. */
+  keyEnvironment: string | null;
 }
 
 function maskKey(value: string): string | null {
@@ -126,21 +164,28 @@ function maskKey(value: string): string | null {
   return `${value.slice(0, 6)}••••••${value.slice(-4)}`;
 }
 
+function midtransModeStatus(mode: MidtransMode): MidtransModeStatus {
+  const key = getServerKey(mode);
+  const env = detectMidtransKeyEnvironment(key);
+  return {
+    configured: Boolean(key),
+    keyPreview: maskKey(key),
+    keyEnvironment: env ? env.toUpperCase() : null,
+  };
+}
+
 /** Status koneksi provider dari environment variable server (tidak pernah membocorkan key utuh). */
 export function getProviderEnvStatus(): ProviderEnvStatus {
-  const midtransKey = process.env.MIDTRANS_SERVER_KEY || '';
   const xenditKey = process.env.XENDIT_SECRET_KEY || '';
+  const modes = {
+    sandbox: midtransModeStatus('sandbox'),
+    production: midtransModeStatus('production'),
+  };
   return {
     midtrans: {
-      configured: midtransKey.length > 0,
-      // MIDTRANS_IS_PRODUCTION diprioritaskan; fallback ke MIDTRANS_ENVIRONMENT (konfigurasi lama)
-      environment: ((): string => {
-        const flag = (process.env.MIDTRANS_IS_PRODUCTION || '').trim().toLowerCase();
-        if (flag === 'true') return 'PRODUCTION';
-        if (flag === 'false') return 'SANDBOX';
-        return process.env.MIDTRANS_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX';
-      })(),
-      keyPreview: maskKey(midtransKey),
+      defaultMode: resolveMidtransMode(),
+      modes,
+      configured: modes.sandbox.configured || modes.production.configured,
     },
     xendit: {
       configured: xenditKey.length > 0,
@@ -150,11 +195,11 @@ export function getProviderEnvStatus(): ProviderEnvStatus {
   };
 }
 
-/** Provider yang layak ditampilkan di checkout: aktif di setelan DAN key-nya terpasang. */
+/** Provider yang layak ditampilkan di checkout: aktif di setelan DAN key mode aktif terpasang. */
 export function getEnabledProviders(settings: PaymentSettings): PaymentProvider[] {
   const env = getProviderEnvStatus();
   const providers: PaymentProvider[] = [];
-  if (settings.midtransEnabled && env.midtrans.configured) providers.push('midtrans');
+  if (settings.midtransEnabled && getServerKey(settings.midtransMode)) providers.push('midtrans');
   if (settings.xenditEnabled && env.xendit.configured) providers.push('xendit');
   return providers;
 }
@@ -201,10 +246,14 @@ export interface SyncResult {
 
 /**
  * Tarik status terbaru dari Midtrans lalu sinkronkan ke DB.
+ * Mode (sandbox/production) diambil dari setelan creator; bila gagal di mode
+ * utama dan key mode lain tersedia, otomatis dicoba ke mode lain (order lama
+ * bisa dibuat di mode berbeda sebelum creator ganti switch).
  * Jika gross_amount dari Midtrans tidak cocok dengan amount order, status TIDAK diubah.
  */
 export async function syncMidtransOrder(order: {
   id: string;
+  creatorId: string;
   paymentRef: string;
   amount: number;
   provider: string;
@@ -228,7 +277,12 @@ export async function syncMidtransOrder(order: {
       message: 'Order tidak memiliki payment_ref',
     };
   }
-  if (!process.env.MIDTRANS_SERVER_KEY) {
+
+  const settings = await getPaymentSettings(order.creatorId);
+  const primaryMode = settings.midtransMode;
+  const otherMode: MidtransMode = primaryMode === 'sandbox' ? 'production' : 'sandbox';
+
+  if (!getServerKey(primaryMode) && !getServerKey(otherMode)) {
     return {
       ok: false,
       previousStatus: order.currentStatus,
@@ -240,15 +294,28 @@ export async function syncMidtransOrder(order: {
 
   let status: Record<string, any>;
   try {
-    status = await MidtransService.getTransactionStatus(order.paymentRef);
+    status = await MidtransService.getTransactionStatus(order.paymentRef, primaryMode);
   } catch (err: any) {
-    return {
-      ok: false,
-      previousStatus: order.currentStatus,
-      currentStatus: order.currentStatus,
-      changed: false,
-      message: err?.message || 'Gagal mengambil status dari Midtrans',
-    };
+    if (!getServerKey(otherMode)) {
+      return {
+        ok: false,
+        previousStatus: order.currentStatus,
+        currentStatus: order.currentStatus,
+        changed: false,
+        message: err?.message || 'Gagal mengambil status dari Midtrans',
+      };
+    }
+    try {
+      status = await MidtransService.getTransactionStatus(order.paymentRef, otherMode);
+    } catch (errOther: any) {
+      return {
+        ok: false,
+        previousStatus: order.currentStatus,
+        currentStatus: order.currentStatus,
+        changed: false,
+        message: errOther?.message || 'Gagal mengambil status dari Midtrans',
+      };
+    }
   }
 
   const gross = Number(status.gross_amount);

@@ -8,16 +8,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { formatCurrency } from '@/lib/utils';
 
+type MidtransMode = 'sandbox' | 'production';
+
 export interface EnvStatus {
-  midtrans: { configured: boolean; environment: string; keyPreview: string | null };
+  midtrans: {
+    defaultMode: MidtransMode;
+    modes: Record<
+      MidtransMode,
+      { configured: boolean; keyPreview: string | null; keyEnvironment: string | null }
+    >;
+    configured: boolean;
+  };
   xendit: { configured: boolean; keyPreview: string | null };
   resend: { configured: boolean };
 }
 
 export interface SettingsValue {
   midtransEnabled: boolean;
+  midtransMode: MidtransMode;
   xenditEnabled: boolean;
   adminFeePercent: number;
   adminFeeFlat: number;
@@ -34,6 +45,7 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [midtransEnabled, setMidtransEnabled] = useState(settings.midtransEnabled);
+  const [midtransMode, setMidtransMode] = useState<MidtransMode>(settings.midtransMode);
   const [xenditEnabled, setXenditEnabled] = useState(settings.xenditEnabled);
   const [percent, setPercent] = useState(String(settings.adminFeePercent));
   const [flat, setFlat] = useState(String(settings.adminFeeFlat));
@@ -50,6 +62,7 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           midtransEnabled,
+          midtransMode,
           xenditEnabled,
           adminFeePercent: percentNum,
           adminFeeFlat: flatNum,
@@ -69,16 +82,28 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
     }
   }
 
+  const midtransModeStatus = env.midtrans.modes[midtransMode];
+  const otherMode: MidtransMode = midtransMode === 'sandbox' ? 'production' : 'sandbox';
+  const otherModeStatus = env.midtrans.modes[otherMode];
+
   const providers = [
     {
       id: 'midtrans',
       name: 'Midtrans',
       desc: 'Transfer bank, QRIS, VA, kartu kredit',
-      configured: env.midtrans.configured,
-      badge: env.midtrans.environment,
-      keyPreview: env.midtrans.keyPreview,
+      configured: midtransModeStatus.configured,
+      badge: midtransMode.toUpperCase(),
+      keyPreview: midtransModeStatus.keyPreview,
       enabled: midtransEnabled,
       setEnabled: setMidtransEnabled,
+      showModeToggle: true,
+      warning: !midtransModeStatus.configured
+        ? otherModeStatus.configured
+          ? `Server Key untuk mode ${midtransMode.toUpperCase()} belum di-set di env (MIDTRANS_SERVER_KEY${
+              midtransMode === 'sandbox' ? '_SANDBOX' : '_PRODUCTION'
+            }). Saat ini hanya key ${otherMode.toUpperCase()} yang terpasang — transaksi akan gagal 401.`
+          : 'Midtrans belum dikonfigurasi — isi MIDTRANS_SERVER_KEY (dan MIDTRANS_SERVER_KEY_SANDBOX bila ingin mode sandbox).'
+        : null,
     },
     {
       id: 'xendit',
@@ -89,6 +114,8 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
       keyPreview: env.xendit.keyPreview,
       enabled: xenditEnabled,
       setEnabled: setXenditEnabled,
+      showModeToggle: false,
+      warning: null as string | null,
     },
   ];
 
@@ -134,8 +161,37 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-0.5 truncate">{p.desc}</p>
+              {p.showModeToggle && (
+                <div className="mt-2 space-y-1">
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={midtransMode}
+                    onValueChange={(v) => {
+                      if (v === 'sandbox' || v === 'production') setMidtransMode(v);
+                    }}
+                    aria-label="Mode Midtrans"
+                  >
+                    <ToggleGroupItem value="sandbox" aria-label="Mode sandbox">
+                      Sandbox
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="production" aria-label="Mode production">
+                      Production
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                  <p className="text-[11px] text-muted-foreground">
+                    Transaksi memakai key & endpoint sesuai mode ini — tidak perlu ganti env var.
+                  </p>
+                </div>
+              )}
               {p.keyPreview && (
                 <p className="text-[11px] font-mono text-muted-foreground mt-1">{p.keyPreview}</p>
+              )}
+              {p.warning && (
+                <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-2">
+                  {p.warning}
+                </p>
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
