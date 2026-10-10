@@ -101,7 +101,8 @@ export class MidtransService {
     mode: MidtransMode = resolveMidtransMode()
   ): Promise<any> {
     try {
-      const result = await getCore(mode).transaction.status({ order_id: orderId });
+      // midtrans-client v1.4.3: transaction.status(orderId) — argumen string, bukan objek
+      const result = await getCore(mode).transaction.status(orderId);
       return result;
     } catch (error: any) {
       console.error('Midtrans Get Transaction Status error:', error);

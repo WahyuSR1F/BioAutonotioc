@@ -54,7 +54,8 @@ declare module 'midtrans-client' {
   export class CoreApi {
     constructor(options: MidtransClientOptions);
     transaction: {
-      status(parameter: { order_id: string }): Promise<Record<string, unknown>>;
+      /** v1.4.3: argumen berupa string order_id / transaction_id (bukan objek). */
+      status(transactionId: string): Promise<Record<string, unknown>>;
     };
   }
 

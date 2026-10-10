@@ -33,11 +33,15 @@ export function resolveMidtransMode(): MidtransMode {
 export const isProduction = resolveMidtransIsProduction();
 export const isSandbox = !isProduction;
 
-/** Deteksi environment asal key dari prefix-nya: 'SB-' sandbox, 'VT-' production. */
+/**
+ * Deteksi environment asal key dari prefix-nya:
+ * - sandbox: `SB-…` (mis. `SB-Mid-server-…`)
+ * - production: `VT-…` (format lama) atau `Mid-…` (mis. `Mid-server-…`)
+ */
 export function detectMidtransKeyEnvironment(key: string): 'sandbox' | 'production' | null {
   const k = key.trim();
   if (k.startsWith('SB-')) return 'sandbox';
-  if (k.startsWith('VT-')) return 'production';
+  if (k.startsWith('VT-') || k.startsWith('Mid-')) return 'production';
   return null;
 }
 
@@ -124,11 +128,21 @@ export function getMidtransMisconfiguration(mode: MidtransMode = resolveMidtrans
       message: `MIDTRANS_SERVER_KEY${mode === 'sandbox' ? '_SANDBOX' : ''} belum di-set (atau masih berisi placeholder) di environment variable server. Ambil Server Key asli dari dashboard Midtrans → Settings → Access Keys.`,
     };
   }
-  if (/^SB-Mid-/.test(key) || /^Mid-/.test(key)) {
+  // Server key modern: "Mid-server-…"/"SB-Mid-server-…"; client key: "Mid-client-…"/"SB-Mid-client-…"
+  if (/Mid-client-/i.test(key)) {
     return {
       code: 'client_key_used',
       message:
-        'MIDTRANS_SERVER_KEY berisi Client Key (diawali Mid-/SB-Mid-). Ganti dengan Server Key dari dashboard Midtrans → Settings → Access Keys.',
+        'MIDTRANS_SERVER_KEY berisi Client Key (mengandung Mid-client-). Ganti dengan Server Key (Mid-server-) dari dashboard Midtrans → Settings → Access Keys.',
+    };
+  }
+  const keyEnv = detectMidtransKeyEnvironment(key);
+  if (keyEnv && keyEnv !== mode) {
+    return {
+      code: 'environment_mismatch',
+      message: `Server Key untuk mode ${mode.toUpperCase()} terdeteksi sebagai key ${keyEnv.toUpperCase()} (${keyEnv === 'production' ? 'Mid-/VT-' : 'SB-'}…) — endpoint ${mode.toUpperCase()} akan menolaknya (401/403). Ganti dengan Server Key ${
+        mode === 'production' ? 'production' : 'sandbox'
+      } yang sesuai.`,
     };
   }
   return null;
