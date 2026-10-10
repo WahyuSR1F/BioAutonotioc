@@ -85,31 +85,45 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
   const midtransModeStatus = env.midtrans.modes[midtransMode];
   const otherMode: MidtransMode = midtransMode === 'sandbox' ? 'production' : 'sandbox';
   const otherModeStatus = env.midtrans.modes[otherMode];
+  // Key terpasang tapi format-nya milik environment lain (mis. key production di var sandbox)
+  const midtransKeyMismatch = Boolean(
+    midtransModeStatus.configured &&
+    midtransModeStatus.keyEnvironment &&
+    midtransModeStatus.keyEnvironment !== midtransMode.toUpperCase()
+  );
+
+  const midtransWarning = !midtransModeStatus.configured
+    ? otherModeStatus.configured
+      ? `Server Key untuk mode ${midtransMode.toUpperCase()} belum di-set di env (MIDTRANS_SERVER_KEY${
+          midtransMode === 'sandbox' ? '_SANDBOX' : '_PRODUCTION'
+        }). Saat ini hanya key ${otherMode.toUpperCase()} yang terpasang — transaksi akan gagal 401.`
+      : 'Midtrans belum dikonfigurasi — isi MIDTRANS_SERVER_KEY (dan MIDTRANS_SERVER_KEY_SANDBOX bila ingin mode sandbox).'
+    : midtransKeyMismatch
+      ? `Key terpasang untuk mode ${midtransMode.toUpperCase()} terdeteksi sebagai key ${midtransModeStatus.keyEnvironment} (${
+          midtransModeStatus.keyEnvironment === 'PRODUCTION' ? 'Mid-server-' : 'SB-'
+        }…) — endpoint ${midtransMode.toUpperCase()} akan menolaknya (403/401). Ganti dengan key ${midtransMode} yang benar, atau pindah toggle ke ${midtransModeStatus.keyEnvironment}.`
+      : null;
 
   const providers = [
     {
       id: 'midtrans',
       name: 'Midtrans',
       desc: 'Transfer bank, QRIS, VA, kartu kredit',
-      configured: midtransModeStatus.configured,
+      configured: midtransModeStatus.configured && !midtransKeyMismatch,
+      statusLabel: midtransKeyMismatch ? 'Key tidak cocok' : null as string | null,
       badge: midtransMode.toUpperCase(),
       keyPreview: midtransModeStatus.keyPreview,
       enabled: midtransEnabled,
       setEnabled: setMidtransEnabled,
       showModeToggle: true,
-      warning: !midtransModeStatus.configured
-        ? otherModeStatus.configured
-          ? `Server Key untuk mode ${midtransMode.toUpperCase()} belum di-set di env (MIDTRANS_SERVER_KEY${
-              midtransMode === 'sandbox' ? '_SANDBOX' : '_PRODUCTION'
-            }). Saat ini hanya key ${otherMode.toUpperCase()} yang terpasang — transaksi akan gagal 401.`
-          : 'Midtrans belum dikonfigurasi — isi MIDTRANS_SERVER_KEY (dan MIDTRANS_SERVER_KEY_SANDBOX bila ingin mode sandbox).'
-        : null,
+      warning: midtransWarning,
     },
     {
       id: 'xendit',
       name: 'Xendit',
       desc: 'QRIS, VA, e-wallet',
       configured: env.xendit.configured,
+      statusLabel: null as string | null,
       badge: null as string | null,
       keyPreview: env.xendit.keyPreview,
       enabled: xenditEnabled,
@@ -146,7 +160,7 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
                     p.configured ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
                   }`}
                 >
-                  {p.configured ? 'Terkonfigurasi' : 'Belum diatur'}
+                  {p.statusLabel ?? (p.configured ? 'Terkonfigurasi' : 'Belum diatur')}
                 </span>
                 {p.badge && (
                   <span
