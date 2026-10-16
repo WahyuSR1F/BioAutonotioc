@@ -58,35 +58,45 @@ function isPlaceholderKey(key: string): boolean {
 }
 
 /**
- * Pilih key untuk `mode`: var khusus menang; jika tidak ada, pakai var umum
- * asalkan environment key cocok dengan mode (atau tidak terdeteksi).
+ * Pilih key untuk `mode`: var khusus menang; jika tidak ada, pakai var umum.
+ * Key hanya dipakai bila environment-nya cocok dengan mode (atau tidak
+ * terdeteksi) — key production di var sandbox tidak akan disuntikkan ke endpoint
+ * sandbox (401/403).
+ * Fallback lintas-var: key yang terlanjur terpasang di var mode LAIN tetap
+ * dipakai bila environment-nya justru cocok dengan mode ini (mis. key production
+ * yang terisi di MIDTRANS_SERVER_KEY_SANDBOX) — supaya key mengikuti mode yang
+ * benar, bukan menolak.
  * Mengembalikan '' bila key untuk mode itu belum tersedia.
  */
-function pickKey(perMode: string, main: string, mode: MidtransMode): string {
+function pickKey(perMode: string, perModeOther: string, main: string, mode: MidtransMode): string {
+  const matchesMode = (key: string): boolean => {
+    const env = detectMidtransKeyEnvironment(key);
+    return env === null || env === mode;
+  };
   const dedicated = perMode.trim();
-  if (dedicated && !isPlaceholderKey(dedicated)) return dedicated;
-  if (!main || isPlaceholderKey(main)) return '';
-  const env = detectMidtransKeyEnvironment(main);
-  if (env === null || env === mode) return main;
+  if (dedicated && !isPlaceholderKey(dedicated) && matchesMode(dedicated)) return dedicated;
+  if (main && !isPlaceholderKey(main) && matchesMode(main)) return main;
+  const other = perModeOther.trim();
+  if (other && !isPlaceholderKey(other) && detectMidtransKeyEnvironment(other) === mode) return other;
   return '';
 }
 
 /** Server key (rahasia) untuk mode tertentu; '' bila belum dikonfigurasi. */
 export function getServerKey(mode: MidtransMode): string {
-  return pickKey(
-    mode === 'production' ? MIDTRANS_SERVER_KEY_PRODUCTION : MIDTRANS_SERVER_KEY_SANDBOX,
-    MAIN_SERVER_KEY,
-    mode
-  );
+  const dedicated =
+    mode === 'production' ? MIDTRANS_SERVER_KEY_PRODUCTION : MIDTRANS_SERVER_KEY_SANDBOX;
+  const dedicatedOther =
+    mode === 'production' ? MIDTRANS_SERVER_KEY_SANDBOX : MIDTRANS_SERVER_KEY_PRODUCTION;
+  return pickKey(dedicated, dedicatedOther, MAIN_SERVER_KEY, mode);
 }
 
 /** Client key (publik, "Mid-…"/"SB-Mid-…") untuk popup Snap.js pada mode tertentu. */
 export function getClientKey(mode: MidtransMode): string {
-  return pickKey(
-    mode === 'production' ? MIDTRANS_CLIENT_KEY_PRODUCTION : MIDTRANS_CLIENT_KEY_SANDBOX,
-    MAIN_CLIENT_KEY,
-    mode
-  );
+  const dedicated =
+    mode === 'production' ? MIDTRANS_CLIENT_KEY_PRODUCTION : MIDTRANS_CLIENT_KEY_SANDBOX;
+  const dedicatedOther =
+    mode === 'production' ? MIDTRANS_CLIENT_KEY_SANDBOX : MIDTRANS_CLIENT_KEY_PRODUCTION;
+  return pickKey(dedicated, dedicatedOther, MAIN_CLIENT_KEY, mode);
 }
 
 /** Semua server key yang terpasang (untuk verifikasi webhook lintas mode). */

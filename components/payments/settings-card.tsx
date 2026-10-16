@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CreditCard, Loader2, Percent, Save, ShieldCheck, Wallet } from 'lucide-react';
@@ -43,6 +43,21 @@ interface Props {
   env: EnvStatus;
 }
 
+/** Key mode tersedia di server DAN environment-nya cocok (tidak akan ditolak endpoint). */
+function isModeUsable(status: EnvStatus['midtrans']['modes'][MidtransMode], mode: MidtransMode): boolean {
+  return status.configured && (!status.keyEnvironment || status.keyEnvironment === mode.toUpperCase());
+}
+
+/**
+ * Mode yang diimplikasikan oleh key yang benar-benar terpasang di server.
+ * null = mode tersimpan sudah bisa dipakai (tidak perlu pindah).
+ */
+function impliedMidtransMode(env: EnvStatus, saved: MidtransMode): MidtransMode | null {
+  if (isModeUsable(env.midtrans.modes[saved], saved)) return null;
+  const other: MidtransMode = saved === 'sandbox' ? 'production' : 'sandbox';
+  return isModeUsable(env.midtrans.modes[other], other) ? other : null;
+}
+
 const PREVIEW_BASE = 100000;
 
 export default function PaymentSettingsCard({ settings, env }: Props) {
@@ -54,6 +69,48 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
   const [xenditEnabled, setXenditEnabled] = useState(settings.xenditEnabled);
   const [percent, setPercent] = useState(String(settings.adminFeePercent));
   const [flat, setFlat] = useState(String(settings.adminFeeFlat));
+
+  // Penanda transisi auto-switch yang sudah ditangani (mencegah PUT dobel, mis. React StrictMode).
+  const autoSwitchedRef = useRef<string | null>(null);
+
+  // Mode otomatis mengikuti key yang terpasang: bila key mode tersimpan tidak tersedia
+  // dan hanya key mode lain yang ada, toggle dipindah + disimpan otomatis, dengan notifikasi.
+  useEffect(() => {
+    const target = impliedMidtransMode(env, settings.midtransMode);
+    if (!target) return;
+    const attempt = `${settings.midtransMode}->${target}`;
+    if (autoSwitchedRef.current === attempt) return;
+    autoSwitchedRef.current = attempt;
+
+    setMidtransMode(target);
+    (async () => {
+      try {
+        const res = await fetch('/api/payments/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            midtransEnabled: settings.midtransEnabled,
+            midtransMode: target,
+            midtransChannels: settings.midtransChannels,
+            xenditEnabled: settings.xenditEnabled,
+            adminFeePercent: settings.adminFeePercent,
+            adminFeeFlat: settings.adminFeeFlat,
+          }),
+        });
+        const result = await res.json();
+        if (!res.ok) {
+          toast.error(result.error || 'Gagal menyimpan mode otomatis — klik Simpan untuk mengulang');
+          return;
+        }
+        toast.info(
+          `Mode Midtrans otomatis dipindah ${settings.midtransMode.toUpperCase()} → ${target.toUpperCase()}: key yang terpasang hanya tersedia untuk mode ${target.toUpperCase()}. Setelan disimpan otomatis.`
+        );
+        router.refresh();
+      } catch {
+        toast.error('Gagal menyimpan mode otomatis — klik Simpan untuk mengulang');
+      }
+    })();
+  }, [env, settings, router]);
 
   const percentNum = Math.min(100, Math.max(0, Number(percent) || 0));
   const flatNum = Math.max(0, Number(flat) || 0);
@@ -201,7 +258,8 @@ export default function PaymentSettingsCard({ settings, env }: Props) {
                     </ToggleGroupItem>
                   </ToggleGroup>
                   <p className="text-[11px] text-muted-foreground">
-                    Transaksi memakai key & endpoint sesuai mode ini — tidak perlu ganti env var.
+                    Transaksi memakai key &amp; endpoint sesuai mode ini. Bila key yang terpasang
+                    hanya milik satu mode, toggle otomatis mengikuti key tersebut.
                   </p>
                 </div>
               )}
