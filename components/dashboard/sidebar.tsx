@@ -11,6 +11,8 @@ import {
   Settings,
   Zap,
   LogOut,
+  Bot,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
@@ -21,6 +23,8 @@ const navItems = [
   { href: '/dashboard/orders', label: 'Pesanan', icon: ShoppingCart },
   { href: '/dashboard/payments', label: 'Pembayaran', icon: CreditCard },
   { href: '/dashboard/deliveries', label: 'Pengiriman', icon: Send },
+  { href: '/dashboard/assistant', label: 'Asisten AI', icon: Bot },
+  { href: '/dashboard/agents', label: 'Agen AI', icon: Sparkles },
   { href: '/dashboard/settings', label: 'Pengaturan', icon: Settings },
 ];
 

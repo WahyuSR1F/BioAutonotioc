@@ -150,3 +150,35 @@ CREATE TABLE IF NOT EXISTS download_tokens (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS download_tokens_order_id_idx ON download_tokens(order_id);
+
+-- ============================================================
+-- Fitur Asisten AI (multi-agent + routing)
+-- ============================================================
+
+-- Daftar agent AI milik creator. is_active = mode on/off,
+-- is_default = agent yang dipakai routing otomatis (mode Auto).
+CREATE TABLE IF NOT EXISTS ai_agents (
+  id            TEXT PRIMARY KEY,
+  creator_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  system_prompt TEXT NOT NULL,
+  model         TEXT NOT NULL DEFAULT 'gpt-4o-mini',
+  temperature   REAL NOT NULL DEFAULT 0.7 CHECK (temperature >= 0 AND temperature <= 2),
+  is_active     INTEGER NOT NULL DEFAULT 1,
+  is_default    INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS ai_agents_creator_id_idx ON ai_agents(creator_id);
+
+-- Riwayat chat asisten AI
+CREATE TABLE IF NOT EXISTS ai_chat_messages (
+  id         TEXT PRIMARY KEY,
+  creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent_id   TEXT REFERENCES ai_agents(id) ON DELETE SET NULL,
+  role       TEXT NOT NULL CHECK (role IN ('user','assistant')),
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS ai_chat_messages_creator_id_idx ON ai_chat_messages(creator_id, created_at);

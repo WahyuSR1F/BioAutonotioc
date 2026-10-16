@@ -1,6 +1,7 @@
 import { getUser } from '@/lib/auth/me';
 import { redirect } from 'next/navigation';
 import Sidebar from '@/components/dashboard/sidebar';
+import AiFloatingWidget from '@/components/ai/floating-widget';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser();
@@ -13,6 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <main className="flex-1 overflow-auto">
         {children}
       </main>
+      <AiFloatingWidget />
     </div>
   );
 }
